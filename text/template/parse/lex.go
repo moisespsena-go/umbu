@@ -58,30 +58,30 @@ const (
 	itemText       // plain text
 	itemVariable   // variable starting with '$', such as '$' or  '$1' or '$hello'
 	// Keywords appear after all the rest.
-	itemKeyword  // used only to delimit the keywords
-	itemBlock    // block keyword
-	itemDot      // the cursor, spelled '.'
-	itemDefine   // define keyword
-	itemElse     // else keyword
-	itemEnd      // end keyword
-	itemIf       // if keyword
-	itemNil      // the untyped nil constant, easiest to treat as a keyword
-	itemRange    // range keyword
-	itemTemplate // template keyword
-	itemWith     // with keyword
+	itemKeyword     // used only to delimit the keywords
+	itemBlock       // block keyword
+	itemDot         // the cursor, spelled '.'
+	itemDefine      // define keyword
+	itemElse        // else keyword
+	itemEnd         // end keyword
+	itemIf          // if keywordVar
+	itemNil         // the untyped nil constant, easiest to treat as a keyword
+	itemRange       // range keyword
+	itemTemplate    // template keyword
+	itemWith        // with keyword
 )
 
 var key = map[string]itemType{
-	".":        itemDot,
-	"block":    itemBlock,
-	"define":   itemDefine,
-	"else":     itemElse,
-	"end":      itemEnd,
-	"if":       itemIf,
-	"range":    itemRange,
-	"nil":      itemNil,
-	"template": itemTemplate,
-	"with":     itemWith,
+	".":           itemDot,
+	"block":       itemBlock,
+	"define":      itemDefine,
+	"else":        itemElse,
+	"end":         itemEnd,
+	"if":          itemIf,
+	"range":       itemRange,
+	"nil":         itemNil,
+	"template":    itemTemplate,
+	"with":        itemWith,
 }
 
 const eof = -1
@@ -492,7 +492,7 @@ func lexFieldOrVariable(l *lexer, typ itemType) stateFn {
 			break
 		}
 	}
-	if !l.atTerminator() {
+	if !l.atTerminator('?') {
 		return l.errorf("bad character %#U", r)
 	}
 	l.emit(typ)
@@ -503,7 +503,7 @@ func lexFieldOrVariable(l *lexer, typ itemType) stateFn {
 // appear after an identifier. Breaks .X.Y into two pieces. Also catches cases
 // like "$x+2" not being acceptable without a space, in case we decide one
 // day to implement arithmetic.
-func (l *lexer) atTerminator() bool {
+func (l *lexer) atTerminator(other ...rune) bool {
 	r := l.peek()
 	if isSpace(r) || isEndOfLine(r) {
 		return true
@@ -512,6 +512,13 @@ func (l *lexer) atTerminator() bool {
 	case eof, '.', ',', '|', ':', ')', '(':
 		return true
 	}
+
+	for _, o := range other {
+		if r == o {
+			return true
+		}
+	}
+
 	// Does r start the delimiter? This can be ambiguous (with delim=="//", $x/2 will
 	// succeed but should fail) but only in extremely rare cases caused by willfully
 	// bad choice of delimiter.

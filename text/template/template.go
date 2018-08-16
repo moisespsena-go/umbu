@@ -5,8 +5,6 @@
 package template
 
 import (
-	"reflect"
-	"sync"
 	"github.com/moisespsena/template/text/template/parse"
 )
 
@@ -14,18 +12,13 @@ import (
 type common struct {
 	tmpl   map[string]*Template // Map from name to defined templates.
 	option option
-	// We use two maps, one for parsing and one for execution.
-	// This separation makes the API cleaner since it doesn't
-	// expose reflection to the client.
-	muFuncs    sync.RWMutex // protects parseFuncs and execFuncs
-	parseFuncs FuncMap
-	execFuncs  map[string]reflect.Value
 }
 
 // Template is the representation of a parsed template. The *parse.Tree
 // field is exported only for use by html/template and should be treated
 // as unexported by all other clients.
 type Template struct {
+	Path string
 	name string
 	*parse.Tree
 	*common
@@ -47,6 +40,20 @@ func (t *Template) Name() string {
 	return t.name
 }
 
+func (t *Template) FullName() string {
+	name := t.name
+	if t.Path != "" {
+		name = t.Path + " [" + name + "]"
+	}
+	return name
+}
+
+
+func (t *Template) SetPath(path string) *Template {
+	t.Path = path
+	return t
+}
+
 // New allocates a new, undefined template associated with the given one and with the same
 // delimiters. The association, which is transitive, allows one template to
 // invoke another with a {{template}} action.
@@ -66,8 +73,6 @@ func (t *Template) init() {
 	if t.common == nil {
 		c := new(common)
 		c.tmpl = make(map[string]*Template)
-		c.parseFuncs = make(FuncMap)
-		c.execFuncs = make(map[string]reflect.Value)
 		t.common = c
 	}
 }
@@ -92,14 +97,6 @@ func (t *Template) Clone() (*Template, error) {
 		// The associated templates share nt's common structure.
 		tmpl := v.copy(nt.common)
 		nt.tmpl[k] = tmpl
-	}
-	t.muFuncs.RLock()
-	defer t.muFuncs.RUnlock()
-	for k, v := range t.parseFuncs {
-		nt.parseFuncs[k] = v
-	}
-	for k, v := range t.execFuncs {
-		nt.execFuncs[k] = v
 	}
 	return nt, nil
 }
@@ -158,21 +155,6 @@ func (t *Template) Delims(left, right string) *Template {
 	return t
 }
 
-// Funcs adds the elements of the argument map to the template's function map.
-// It must be called before the template is parsed.
-// It panics if a value in the map is not a function with appropriate return
-// type or if the name cannot be used syntactically as a function in a template.
-// It is legal to overwrite elements of the map. The return value is the template,
-// so calls can be chained.
-func (t *Template) Funcs(funcMap FuncMap) *Template {
-	t.init()
-	t.muFuncs.Lock()
-	defer t.muFuncs.Unlock()
-	addValueFuncs(t.execFuncs, funcMap)
-	addFuncs(t.parseFuncs, funcMap)
-	return t
-}
-
 // Lookup returns the template with the given name that is associated with t.
 // It returns nil if there is no such template or the template has no definition.
 func (t *Template) Lookup(name string) *Template {
@@ -194,9 +176,7 @@ func (t *Template) Lookup(name string) *Template {
 // overwriting the main template body.
 func (t *Template) Parse(text string) (*Template, error) {
 	t.init()
-	t.muFuncs.RLock()
-	trees, err := parse.Parse(t.name, text, t.leftDelim, t.rightDelim, t.parseFuncs, builtins)
-	t.muFuncs.RUnlock()
+	trees, err := parse.Parse(t.name, text, t.leftDelim, t.rightDelim)
 	if err != nil {
 		return nil, err
 	}

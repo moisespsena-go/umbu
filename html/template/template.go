@@ -10,8 +10,8 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"sync"
-	"text/template"
-	"text/template/parse"
+	"github.com/moisespsena/template/text/template"
+	"github.com/moisespsena/template/text/template/parse"
 )
 
 // Template is a specialized Template from "text/template" that produces a safe
@@ -37,6 +37,11 @@ type nameSpace struct {
 	set     map[string]*Template
 	escaped bool
 	esc     escaper
+}
+
+func (t *Template) SetPath(path string) *Template {
+	t.text.SetPath(path)
+	return t
 }
 
 // Templates returns a slice of the templates associated with t, including t
@@ -108,6 +113,10 @@ func (t *Template) escape() error {
 	return nil
 }
 
+func (t *Template) CreateExecutor() *template.Executor {
+	return t.text.CreateExecutor().FuncsValues(builtins)
+}
+
 // Execute applies a parsed template to the specified data object,
 // writing the output to wr.
 // If an error occurs executing the template or writing its output,
@@ -115,11 +124,11 @@ func (t *Template) escape() error {
 // the output writer.
 // A template may be executed safely in parallel, although if parallel
 // executions share a Writer the output may be interleaved.
-func (t *Template) Execute(wr io.Writer, data interface{}) error {
+func (t *Template) Execute(wr io.Writer, data interface{}, funcs... interface{}) error {
 	if err := t.escape(); err != nil {
 		return err
 	}
-	return t.text.Execute(wr, data)
+	return t.CreateExecutor().Execute(wr, data, funcs...)
 }
 
 // ExecuteTemplate applies the template associated with t that has the given
@@ -134,7 +143,11 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data interface{}) 
 	if err != nil {
 		return err
 	}
-	return tmpl.text.Execute(wr, data)
+	return tmpl.CreateExecutor().Execute(wr, data)
+}
+
+func (t *Template) ExecuteString(data interface{}) (string, error) {
+	return t.CreateExecutor().ExecuteString(data)
 }
 
 // lookupAndEscapeTemplate guarantees that the template with the given name
@@ -181,7 +194,7 @@ func (t *Template) DefinedTemplates() string {
 // is considered empty and will not replace an existing template's body.
 // This allows using Parse to add new named template definitions without
 // overwriting the main template body.
-func (t *Template) Parse(text string) (*Template, error) {
+func (t *Template) Parse(text string, cb ...func(t *Template) error) (*Template, error) {
 	if err := t.checkCanParse(); err != nil {
 		return nil, err
 	}
@@ -205,6 +218,14 @@ func (t *Template) Parse(text string) (*Template, error) {
 		tmpl.text = v
 		tmpl.Tree = v.Tree
 	}
+
+	for _, cb := range cb {
+		err = cb(t)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return t, nil
 }
 
@@ -316,25 +337,6 @@ func (t *Template) new(name string) *Template {
 // Name returns the name of the template.
 func (t *Template) Name() string {
 	return t.text.Name()
-}
-
-// FuncMap is the type of the map defining the mapping from names to
-// functions. Each function must have either a single return value, or two
-// return values of which the second has type error. In that case, if the
-// second (error) argument evaluates to non-nil during execution, execution
-// terminates and Execute returns that error. FuncMap has the same base type
-// as FuncMap in "text/template", copied here so clients need not import
-// "text/template".
-type FuncMap map[string]interface{}
-
-// Funcs adds the elements of the argument map to the template's function map.
-// It must be called before the template is parsed.
-// It panics if a value in the map is not a function with appropriate return
-// type. However, it is legal to overwrite elements of the map. The return
-// value is the template, so calls can be chained.
-func (t *Template) Funcs(funcMap FuncMap) *Template {
-	t.text.Funcs(template.FuncMap(funcMap))
-	return t
 }
 
 // Delims sets the action delimiters to the specified strings, to be used in

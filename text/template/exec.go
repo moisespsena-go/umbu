@@ -10,8 +10,13 @@ import (
 	"io"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
+
+	"unicode"
+
+	"github.com/moisespsena/template/funcs"
 	"github.com/moisespsena/template/text/template/parse"
 )
 
@@ -25,11 +30,15 @@ const maxExecDepth = 100000
 // template so that multiple executions of the same template
 // can execute in parallel.
 type state struct {
-	tmpl  *Template
-	wr    io.Writer
-	node  parse.Node // current node, for errors
-	vars  []variable // push-down stack of variable values.
-	depth int        // the height of the stack of executing templates.
+	e            *Executor
+	tmpl         *Template
+	wr           io.Writer
+	node         parse.Node // current node, for errors
+	vars         []variable // push-down stack of variable values.
+	depth        int        // the height of the stack of executing templates.
+	funcsValue   map[string]*funcs.FuncValue
+	contextValue reflect.Value
+	local        *LocalData
 }
 
 // variable holds the dynamic value of a variable such as $, $x etc.
@@ -101,15 +110,29 @@ func (e ExecError) Error() string {
 	return e.Err.Error()
 }
 
-// errorf records an ExecError and terminates processing.
-func (s *state) errorf(format string, args ...interface{}) {
-	name := doublePercent(s.tmpl.Name())
+func (s *state) panic(err error) {
+	name := doublePercent(s.tmpl.FullName())
+	var info string
 	if s.node == nil {
-		format = fmt.Sprintf("template: %s: %s", name, format)
+		info = fmt.Sprintf("template: %s: %s", name)
 	} else {
 		location, context := s.tmpl.ErrorContext(s.node)
-		format = fmt.Sprintf("template: %s: executing %q at <%s>: %s", location, name, doublePercent(context), format)
+		info = fmt.Sprintf("template: %s: executing %q at <%s>", location, name, doublePercent(context))
 	}
+
+	var ewt *ErrorWithTrace
+	var ok bool
+
+	if ewt, ok = err.(*ErrorWithTrace); ok {
+		ewt.Err = fmt.Sprintf("%v: %v", info, ewt.Err)
+	} else {
+		ewt = &ErrorWithTrace{fmt.Sprintf("%v: %v", info, err), debug.Stack()}
+	}
+	panic(ewt)
+}
+
+// errorf records an ExecError and terminates processing.
+func (s *state) errorf(format string, args ...interface{}) {
 	panic(ExecError{
 		Name: s.tmpl.Name(),
 		Err:  fmt.Errorf(format, args...),
@@ -163,7 +186,15 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data interface{}) 
 	if tmpl == nil {
 		return fmt.Errorf("template: no template %q associated with template %q", name, t.name)
 	}
-	return tmpl.Execute(wr, data)
+	return tmpl.Executor().Execute(wr, data)
+}
+
+func (t *Template) Executor(funcMaps ...funcs.FuncMap) *Executor {
+	return t.CreateExecutor(funcMaps...)
+}
+
+func (t *Template) CreateExecutor(funcMaps ...funcs.FuncMap) *Executor {
+	return NewExecutor(t).SetFuncs(builtinFuncs).Funcs(funcMaps...)
 }
 
 // Execute applies a parsed template to the specified data object,
@@ -177,25 +208,11 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data interface{}) 
 // If data is a reflect.Value, the template applies to the concrete
 // value that the reflect.Value holds, as in fmt.Print.
 func (t *Template) Execute(wr io.Writer, data interface{}) error {
-	return t.execute(wr, data)
+	return t.Executor().Execute(wr, data)
 }
 
-func (t *Template) execute(wr io.Writer, data interface{}) (err error) {
-	defer errRecover(&err)
-	value, ok := data.(reflect.Value)
-	if !ok {
-		value = reflect.ValueOf(data)
-	}
-	state := &state{
-		tmpl: t,
-		wr:   wr,
-		vars: []variable{{"$", value}},
-	}
-	if t.Tree == nil || t.Root == nil {
-		state.errorf("%q is an incomplete or empty template", t.Name())
-	}
-	state.walk(value, t.Root)
-	return
+func (t *Template) ExecuteString(data interface{}) (string, error) {
+	return t.CreateExecutor().ExecuteString(data)
 }
 
 // DefinedTemplates returns a string listing the defined templates,
@@ -528,14 +545,68 @@ func (s *state) evalFieldChain(dot, receiver reflect.Value, node parse.Node, ide
 	return s.evalField(dot, ident[n-1], node, args, final, receiver)
 }
 
+func (s *state) getFuncs(names ...string) *funcs.FuncValues {
+	return s.e.FilterFuncs(names...)
+}
+
+func (s *state) getExecutor() *Executor {
+	return s.e
+}
+
+func (s *state) dataFuncs(data interface{}, funcsNames ...interface{}) (df *funcs.DataFuncs) {
+	df = funcs.NewDataFuncs(data)
+	funcValues := funcs.FuncValues{}
+
+	l := len(funcsNames)
+	for i := 0; i < l; i++ {
+		switch fv := funcsNames[i].(type) {
+		case string:
+			x := i + 1
+			if x == l {
+				funcValues.SetValue(fv, s.getFuncValue(fv))
+			} else {
+				next := funcsNames[x]
+				if _, ok := next.(string); ok {
+					funcValues.SetValue(fv, s.getFuncValue(fv), false)
+				} else {
+					err := funcValues.Set(fv, next)
+					if err != nil {
+						s.errorf("dataFuncs: invalid funcName[%v]: %v", x, next)
+					}
+					i++
+				}
+			}
+		default:
+			s.errorf("dataFuncs: invalid funcName[%v]", i)
+			return
+		}
+	}
+
+	return
+}
+
+var nilValue = reflect.Value{}
+
+func (s *state) getFuncValue(name string) *funcs.FuncValue {
+	if v, ok := s.funcsValue[name]; ok {
+		return v
+	}
+	v := s.e.FindFunc(name)
+	if v == nil {
+		s.errorf("%q is not a defined function", name)
+	}
+	return v
+}
+
+func (s *state) getFuncRvalue(name string) reflect.Value {
+	return s.getFuncValue(name).ContextualValue(s.contextValue)
+}
+
 func (s *state) evalFunction(dot reflect.Value, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Value) reflect.Value {
 	s.at(node)
 	name := node.Ident
-	function, ok := findFunction(name, s.tmpl)
-	if !ok {
-		s.errorf("%q is not a defined function", name)
-	}
-	return s.evalCall(dot, function, cmd, name, args, final)
+	v := s.getFuncRvalue(name)
+	return s.evalCall(dot, v, cmd, name, args, final)
 }
 
 // evalField evaluates an expression like (.Field) or (.Field arg1 arg2).
@@ -577,6 +648,8 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 				s.errorf("%s has arguments but cannot be invoked as function", fieldName)
 			}
 			return field
+		} else if f, ok := node.(*parse.FieldNode); ok && f.NotRequired {
+			return reflect.ValueOf("")
 		}
 	case reflect.Map:
 		if isNil {
@@ -593,6 +666,9 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 				switch s.tmpl.option.missingKey {
 				case mapInvalid:
 					// Just use the invalid value.
+					if f, ok := node.(*parse.FieldNode); ok && f.NotRequired {
+						return reflect.ValueOf("")
+					}
 				case mapZeroValue:
 					result = reflect.Zero(receiver.Type().Elem())
 				case mapError:
@@ -633,7 +709,7 @@ func (s *state) evalCall(dot, fun reflect.Value, node parse.Node, name string, a
 	} else if numIn != typ.NumIn() {
 		s.errorf("wrong number of args for %s: want %d got %d", name, typ.NumIn(), len(args))
 	}
-	if !goodFunc(typ) {
+	if !funcs.GoodFunc(typ) {
 		// TODO: This could still be a confusing error; maybe goodFunc should provide info.
 		s.errorf("can't call method/function %q with %d results", name, typ.NumOut())
 	}
@@ -667,7 +743,16 @@ func (s *state) evalCall(dot, fun reflect.Value, node parse.Node, name string, a
 		}
 		argv[i] = s.validateType(final, t)
 	}
-	result := fun.Call(argv)
+	if fun.IsNil() || !fun.IsValid() {
+		s.errorf("error calling %q: %s", name, fun.String())
+	}
+
+	result, err := funCall(fun, argv)
+	if err != nil {
+		ewt := err.(*ErrorWithTrace)
+		ewt.Err = fmt.Sprintf("error calling %q:\n%s", name, ewt.Err)
+		s.panic(ewt)
+	}
 	// If we have an error that is not nil, stop execution and return that error to the caller.
 	if len(result) == 2 && !result[1].IsNil() {
 		s.at(node)
@@ -905,6 +990,86 @@ func (s *state) printValue(n parse.Node, v reflect.Value) {
 	if err != nil {
 		s.writeError(err)
 	}
+}
+
+// templateExec executes the template and return the result value.
+func (s *state) trim(value reflect.Value, sep ...reflect.Value) reflect.Value {
+	f := unicode.IsSpace
+
+	if len(sep) > 0 {
+		sepRune := rune(sep[0].String()[0])
+		f = func(r rune) bool {
+			return r == sepRune
+		}
+	}
+
+	trim := func(value reflect.Value) reflect.Value {
+		stringValue := value.String()
+		stringValue = strings.TrimFunc(stringValue, f)
+		return reflect.ValueOf(stringValue)
+	}
+
+	var trimSlice func(value reflect.Value) reflect.Value
+
+	trimSlice = func(value reflect.Value) reflect.Value {
+		var (
+			result = reflect.MakeSlice(value.Type().Elem(), value.Len(), value.Len())
+			v      reflect.Value
+		)
+		for l, i := value.Len(), 0; i < l; i++ {
+			v = value.Index(i)
+			switch v.Kind() {
+			case reflect.String:
+				result.Index(i).Set(trim(v))
+			case reflect.Slice:
+				result.Index(i).Set(trimSlice(v))
+			default:
+				result.Index(i).Set(v)
+			}
+		}
+		return result
+	}
+
+	switch value.Kind() {
+	case reflect.String:
+		return trim(value)
+	case reflect.Slice:
+		return trimSlice(value)
+	default:
+		return value
+	}
+}
+
+// templateExec executes the template and return the result value.
+func (s *state) templateExec(name reflect.Value, pipe ...reflect.Value) reflect.Value {
+	var (
+		names = name.String()
+		data  reflect.Value
+	)
+
+	if len(pipe) == 1 {
+		data = pipe[0]
+	}
+
+	tmpl := s.tmpl.tmpl[names]
+	if tmpl == nil {
+		s.errorf("template %q not defined", names)
+	}
+	if s.depth == maxExecDepth {
+		s.errorf("exceeded maximum template depth (%v)", maxExecDepth)
+	}
+
+	executor := tmpl.CreateExecutor()
+	executor.notCaptureError = true
+	executor.parent = s.e
+	result, err := executor.ExecuteString(data)
+	if err != nil {
+		s.panic(ExecError{
+			Name: s.tmpl.name + "/" + names,
+			Err:  err,
+		})
+	}
+	return reflect.ValueOf(result)
 }
 
 // printableValue returns the, possibly indirected, interface value inside v that

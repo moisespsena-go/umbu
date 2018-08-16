@@ -415,8 +415,9 @@ func (n *NilNode) Copy() Node {
 type FieldNode struct {
 	NodeType
 	Pos
-	tr    *Tree
-	Ident []string // The identifiers in lexical order.
+	tr          *Tree
+	Ident       []string // The identifiers in lexical order.
+	NotRequired bool
 }
 
 func (t *Tree) newField(pos Pos, ident string) *FieldNode {

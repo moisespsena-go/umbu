@@ -6,7 +6,7 @@ package template
 
 import (
 	"fmt"
-	"text/template/parse"
+	"github.com/moisespsena/template/text/template/parse"
 )
 
 // Error describes a problem encountered during template Escaping.

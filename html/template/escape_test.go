@@ -1756,9 +1756,9 @@ func TestRedundantFuncs(t *testing.T) {
 	}
 
 	for n0, m := range redundantFuncs {
-		f0 := funcMap[n0].(func(...interface{}) string)
+		f0 := builtinsFuncMap[n0].(func(...interface{}) string)
 		for n1 := range m {
-			f1 := funcMap[n1].(func(...interface{}) string)
+			f1 := builtinsFuncMap[n1].(func(...interface{}) string)
 			for _, input := range inputs {
 				want := f0(input)
 				if got := f1(want); want != got {

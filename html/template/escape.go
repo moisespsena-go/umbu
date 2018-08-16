@@ -8,9 +8,9 @@ import (
 	"bytes"
 	"fmt"
 	"html"
-	"io"
-	"text/template"
-	"text/template/parse"
+	"github.com/moisespsena/template/text/template"
+	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena/template/funcs"
 )
 
 // escapeTemplate rewrites the named template, which must be
@@ -58,8 +58,8 @@ func evalArgs(args ...interface{}) string {
 	return fmt.Sprint(args...)
 }
 
-// funcMap maps command names to functions that render their inputs safe.
-var funcMap = template.FuncMap{
+// builtinsFuncMap maps command names to functions that render their inputs safe.
+var builtinsFuncMap = funcs.FuncMap{
 	"_html_template_attrescaper":     attrEscaper,
 	"_html_template_commentescaper":  commentEscaper,
 	"_html_template_cssescaper":      cssEscaper,
@@ -75,6 +75,17 @@ var funcMap = template.FuncMap{
 	"_html_template_urlfilter":       urlFilter,
 	"_html_template_urlnormalizer":   urlNormalizer,
 	"_eval_args_":                    evalArgs,
+}
+
+var builtins *funcs.FuncValues
+
+func init()  {
+	fcs, err := funcs.CreateValuesFunc(builtinsFuncMap)
+	if err != nil {
+		panic(err)
+	}
+
+	builtins = fcs
 }
 
 // escaper collects type inferences about templates and changes needed to make
@@ -326,7 +337,7 @@ func escFnsEq(a, b string) bool {
 	return a == b
 }
 
-// redundantFuncs[a][b] implies that funcMap[b](funcMap[a](x)) == funcMap[a](x)
+// redundantFuncs[a][b] implies that builtinsFuncMap[b](builtinsFuncMap[a](x)) == builtinsFuncMap[a](x)
 // for all x.
 var redundantFuncs = map[string]map[string]bool{
 	"_html_template_commentescaper": {
@@ -792,7 +803,7 @@ func (e *escaper) editTextNode(n *parse.TextNode, text []byte) {
 // autoescape content and adds any derived templates to the set.
 func (e *escaper) commit() {
 	for name := range e.output {
-		e.template(name).Funcs(funcMap)
+		e.template(name)
 	}
 	// Any template from the name space associated with this escaper can be used
 	// to add derived templates to the underlying text/template name space.
@@ -837,45 +848,4 @@ func (e *escaper) arbitraryTemplate() *Template {
 		return t
 	}
 	panic("no templates in name space")
-}
-
-// Forwarding functions so that clients need only import this package
-// to reach the general escaping functions of text/template.
-
-// HTMLEscape writes to w the escaped HTML equivalent of the plain text data b.
-func HTMLEscape(w io.Writer, b []byte) {
-	template.HTMLEscape(w, b)
-}
-
-// HTMLEscapeString returns the escaped HTML equivalent of the plain text data s.
-func HTMLEscapeString(s string) string {
-	return template.HTMLEscapeString(s)
-}
-
-// HTMLEscaper returns the escaped HTML equivalent of the textual
-// representation of its arguments.
-func HTMLEscaper(args ...interface{}) string {
-	return template.HTMLEscaper(args...)
-}
-
-// JSEscape writes to w the escaped JavaScript equivalent of the plain text data b.
-func JSEscape(w io.Writer, b []byte) {
-	template.JSEscape(w, b)
-}
-
-// JSEscapeString returns the escaped JavaScript equivalent of the plain text data s.
-func JSEscapeString(s string) string {
-	return template.JSEscapeString(s)
-}
-
-// JSEscaper returns the escaped JavaScript equivalent of the textual
-// representation of its arguments.
-func JSEscaper(args ...interface{}) string {
-	return template.JSEscaper(args...)
-}
-
-// URLQueryEscaper returns the escaped value of the textual representation of
-// its arguments in a form suitable for embedding in a URL query.
-func URLQueryEscaper(args ...interface{}) string {
-	return template.URLQueryEscaper(args...)
 }

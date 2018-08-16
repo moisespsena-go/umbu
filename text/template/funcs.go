@@ -5,43 +5,29 @@
 package template
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"net/url"
 	"reflect"
+	"github.com/moisespsena/template/funcs"
+	"text/template"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
-// FuncMap is the type of the map defining the mapping from names to functions.
-// Each function must have either a single return value, or two return values of
-// which the second has type error. In that case, if the second (error)
-// return value evaluates to non-nil during execution, execution terminates and
-// Execute returns that error.
-//
-// When template execution invokes a function with an argument list, that list
-// must be assignable to the function's parameter types. Functions meant to
-// apply to arguments of arbitrary type can use parameters of type interface{} or
-// of type reflect.Value. Similarly, functions meant to return a result of arbitrary
-// type can return interface{} or reflect.Value.
-type FuncMap map[string]interface{}
 
-var builtins = FuncMap{
+var builtins = funcs.FuncMap{
 	"and":      and,
 	"call":     call,
-	"html":     HTMLEscaper,
+	"html":     template.HTMLEscaper,
 	"index":    index,
-	"js":       JSEscaper,
+	"js":       template.JSEscaper,
 	"len":      length,
 	"not":      not,
 	"or":       or,
 	"print":    fmt.Sprint,
 	"printf":   fmt.Sprintf,
 	"println":  fmt.Sprintln,
-	"urlquery": URLQueryEscaper,
+	"urlquery": template.URLQueryEscaper,
+	"contains": contains,
 
 	// Comparisons
 	"eq": eq, // ==
@@ -52,83 +38,17 @@ var builtins = FuncMap{
 	"ne": ne, // !=
 }
 
-var builtinFuncs = createValueFuncs(builtins)
+var builtinFuncs *funcs.FuncValues
 
-// createValueFuncs turns a FuncMap into a map[string]reflect.Value
-func createValueFuncs(funcMap FuncMap) map[string]reflect.Value {
-	m := make(map[string]reflect.Value)
-	addValueFuncs(m, funcMap)
-	return m
+func init()  {
+	fcs, err := funcs.CreateValuesFunc(builtins)
+	if err != nil {
+		panic(err)
+	}
+
+	builtinFuncs = fcs
 }
 
-// addValueFuncs adds to values the functions in funcs, converting them to reflect.Values.
-func addValueFuncs(out map[string]reflect.Value, in FuncMap) {
-	for name, fn := range in {
-		if !goodName(name) {
-			panic(fmt.Errorf("function name %s is not a valid identifier", name))
-		}
-		v := reflect.ValueOf(fn)
-		if v.Kind() != reflect.Func {
-			panic("value for " + name + " not a function")
-		}
-		if !goodFunc(v.Type()) {
-			panic(fmt.Errorf("can't install method/function %q with %d results", name, v.Type().NumOut()))
-		}
-		out[name] = v
-	}
-}
-
-// addFuncs adds to values the functions in funcs. It does no checking of the input -
-// call addValueFuncs first.
-func addFuncs(out, in FuncMap) {
-	for name, fn := range in {
-		out[name] = fn
-	}
-}
-
-// goodFunc reports whether the function or method has the right result signature.
-func goodFunc(typ reflect.Type) bool {
-	// We allow functions with 1 result or 2 results where the second is an error.
-	switch {
-	case typ.NumOut() == 1:
-		return true
-	case typ.NumOut() == 2 && typ.Out(1) == errorType:
-		return true
-	}
-	return false
-}
-
-// goodName reports whether the function name is a valid identifier.
-func goodName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i, r := range name {
-		switch {
-		case r == '_':
-		case i == 0 && !unicode.IsLetter(r):
-			return false
-		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
-			return false
-		}
-	}
-	return true
-}
-
-// findFunction looks for a function in the template, and global map.
-func findFunction(name string, tmpl *Template) (reflect.Value, bool) {
-	if tmpl != nil && tmpl.common != nil {
-		tmpl.muFuncs.RLock()
-		defer tmpl.muFuncs.RUnlock()
-		if fn := tmpl.execFuncs[name]; fn.IsValid() {
-			return fn, true
-		}
-	}
-	if fn := builtinFuncs[name]; fn.IsValid() {
-		return fn, true
-	}
-	return reflect.Value{}, false
-}
 
 // prepareArg checks if value can be used as an argument of type argType, and
 // converts an invalid value to appropriate zero if possible.
@@ -143,6 +63,79 @@ func prepareArg(value reflect.Value, argType reflect.Type) (reflect.Value, error
 		return reflect.Value{}, fmt.Errorf("value has type %s; should be %s", value.Type(), argType)
 	}
 	return value, nil
+}
+
+var FALSE = reflect.ValueOf(false)
+var TRUE = reflect.ValueOf(true)
+
+func contains(item reflect.Value, sub ...reflect.Value) (reflect.Value, error) {
+	v := indirectInterface(item)
+	if !v.IsValid() {
+		return reflect.Value{}, fmt.Errorf("index of untyped nil")
+	}
+
+	switch item.Kind() {
+	case reflect.Array, reflect.Slice:
+		l := v.Len()
+		if l == 0 {
+			return FALSE, nil
+		}
+
+		for _, i := range sub {
+			index := indirectInterface(i)
+			var isNil bool
+			if v, isNil = indirect(v); isNil {
+				return reflect.Value{}, fmt.Errorf("index of nil pointer")
+			}
+
+			var tok bool
+
+			for j := 0; j < l; j++ {
+				if v.Index(j) == index {
+					tok = true
+					break
+				}
+			}
+
+			if !tok {
+				return FALSE, nil
+			}
+		}
+	case reflect.String:
+		str := v.String()
+
+		for ix, i := range sub {
+			index := indirectInterface(i)
+			var isNil bool
+			if v, isNil = indirect(v); isNil {
+				return reflect.Value{}, fmt.Errorf("index of nil pointer")
+			}
+			if index.Kind() != reflect.String {
+				return reflect.Value{}, fmt.Errorf("Arg %v is not a string value.", ix+1)
+			}
+			if !strings.Contains(str, index.String()) {
+				return FALSE, nil
+			}
+		}
+	case reflect.Map:
+		l := v.Len()
+		if l == 0 {
+			return FALSE, nil
+		}
+
+		for _, i := range sub {
+			index := indirectInterface(i)
+			var isNil bool
+			if v, isNil = indirect(v); isNil {
+				return reflect.Value{}, fmt.Errorf("index of nil pointer")
+			}
+
+			if !v.MapIndex(index).IsValid() {
+				return FALSE, nil
+			}
+		}
+	}
+	return TRUE, nil
 }
 
 // Indexing.
@@ -230,7 +223,7 @@ func call(fn reflect.Value, args ...reflect.Value) (reflect.Value, error) {
 	if typ.Kind() != reflect.Func {
 		return reflect.Value{}, fmt.Errorf("non-function of type %s", typ)
 	}
-	if !goodFunc(typ) {
+	if !funcs.GoodFunc(typ) {
 		return reflect.Value{}, fmt.Errorf("function called with %d args; should be 1 or 2", typ.NumOut())
 	}
 	numIn := typ.NumIn()
@@ -479,175 +472,4 @@ func ge(arg1, arg2 reflect.Value) (bool, error) {
 		return false, err
 	}
 	return !lessThan, nil
-}
-
-// HTML escaping.
-
-var (
-	htmlQuot = []byte("&#34;") // shorter than "&quot;"
-	htmlApos = []byte("&#39;") // shorter than "&apos;" and apos was not in HTML until HTML5
-	htmlAmp  = []byte("&amp;")
-	htmlLt   = []byte("&lt;")
-	htmlGt   = []byte("&gt;")
-	htmlNull = []byte("\uFFFD")
-)
-
-// HTMLEscape writes to w the escaped HTML equivalent of the plain text data b.
-func HTMLEscape(w io.Writer, b []byte) {
-	last := 0
-	for i, c := range b {
-		var html []byte
-		switch c {
-		case '\000':
-			html = htmlNull
-		case '"':
-			html = htmlQuot
-		case '\'':
-			html = htmlApos
-		case '&':
-			html = htmlAmp
-		case '<':
-			html = htmlLt
-		case '>':
-			html = htmlGt
-		default:
-			continue
-		}
-		w.Write(b[last:i])
-		w.Write(html)
-		last = i + 1
-	}
-	w.Write(b[last:])
-}
-
-// HTMLEscapeString returns the escaped HTML equivalent of the plain text data s.
-func HTMLEscapeString(s string) string {
-	// Avoid allocation if we can.
-	if !strings.ContainsAny(s, "'\"&<>\000") {
-		return s
-	}
-	var b bytes.Buffer
-	HTMLEscape(&b, []byte(s))
-	return b.String()
-}
-
-// HTMLEscaper returns the escaped HTML equivalent of the textual
-// representation of its arguments.
-func HTMLEscaper(args ...interface{}) string {
-	return HTMLEscapeString(evalArgs(args))
-}
-
-// JavaScript escaping.
-
-var (
-	jsLowUni = []byte(`\u00`)
-	hex      = []byte("0123456789ABCDEF")
-
-	jsBackslash = []byte(`\\`)
-	jsApos      = []byte(`\'`)
-	jsQuot      = []byte(`\"`)
-	jsLt        = []byte(`\x3C`)
-	jsGt        = []byte(`\x3E`)
-)
-
-// JSEscape writes to w the escaped JavaScript equivalent of the plain text data b.
-func JSEscape(w io.Writer, b []byte) {
-	last := 0
-	for i := 0; i < len(b); i++ {
-		c := b[i]
-
-		if !jsIsSpecial(rune(c)) {
-			// fast path: nothing to do
-			continue
-		}
-		w.Write(b[last:i])
-
-		if c < utf8.RuneSelf {
-			// Quotes, slashes and angle brackets get quoted.
-			// Control characters get written as \u00XX.
-			switch c {
-			case '\\':
-				w.Write(jsBackslash)
-			case '\'':
-				w.Write(jsApos)
-			case '"':
-				w.Write(jsQuot)
-			case '<':
-				w.Write(jsLt)
-			case '>':
-				w.Write(jsGt)
-			default:
-				w.Write(jsLowUni)
-				t, b := c>>4, c&0x0f
-				w.Write(hex[t : t+1])
-				w.Write(hex[b : b+1])
-			}
-		} else {
-			// Unicode rune.
-			r, size := utf8.DecodeRune(b[i:])
-			if unicode.IsPrint(r) {
-				w.Write(b[i : i+size])
-			} else {
-				fmt.Fprintf(w, "\\u%04X", r)
-			}
-			i += size - 1
-		}
-		last = i + 1
-	}
-	w.Write(b[last:])
-}
-
-// JSEscapeString returns the escaped JavaScript equivalent of the plain text data s.
-func JSEscapeString(s string) string {
-	// Avoid allocation if we can.
-	if strings.IndexFunc(s, jsIsSpecial) < 0 {
-		return s
-	}
-	var b bytes.Buffer
-	JSEscape(&b, []byte(s))
-	return b.String()
-}
-
-func jsIsSpecial(r rune) bool {
-	switch r {
-	case '\\', '\'', '"', '<', '>':
-		return true
-	}
-	return r < ' ' || utf8.RuneSelf <= r
-}
-
-// JSEscaper returns the escaped JavaScript equivalent of the textual
-// representation of its arguments.
-func JSEscaper(args ...interface{}) string {
-	return JSEscapeString(evalArgs(args))
-}
-
-// URLQueryEscaper returns the escaped value of the textual representation of
-// its arguments in a form suitable for embedding in a URL query.
-func URLQueryEscaper(args ...interface{}) string {
-	return url.QueryEscape(evalArgs(args))
-}
-
-// evalArgs formats the list of arguments into a string. It is therefore equivalent to
-//	fmt.Sprint(args...)
-// except that each argument is indirected (if a pointer), as required,
-// using the same rules as the default string evaluation during template
-// execution.
-func evalArgs(args []interface{}) string {
-	ok := false
-	var s string
-	// Fast path for simple common case.
-	if len(args) == 1 {
-		s, ok = args[0].(string)
-	}
-	if !ok {
-		for i, arg := range args {
-			a, ok := printableValue(reflect.ValueOf(arg))
-			if ok {
-				args[i] = a
-			} // else let fmt do its thing
-		}
-		s = fmt.Sprint(args...)
-	}
-	return s
 }
