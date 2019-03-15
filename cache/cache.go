@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/moisespsena/go-assetfs/api"
+	"github.com/moisespsena/go-assetfs/assetfsapi"
 	"github.com/moisespsena/template/text/template"
 )
 
@@ -46,7 +46,7 @@ func (ec *ExecutorCache) LoadOrStore(name string, loader func(name string) (*tem
 	return loader(name)
 }
 
-func (ec *ExecutorCache) LoadOrStoreInfo(info api.FileInfo, loader func(info api.FileInfo) (*template.Executor, error)) (*template.Executor, error) {
+func (ec *ExecutorCache) LoadOrStoreInfo(info assetfsapi.FileInfo, loader func(info assetfsapi.FileInfo) (*template.Executor, error)) (*template.Executor, error) {
 	if ec.Enable {
 		v, ok := ec.data.Load(info)
 		if !ok {
@@ -89,8 +89,8 @@ func (ec *ExecutorCache) LoadOrStoreNames(name string, loader func(name string) 
 	return nil, nil
 }
 
-func (ec *ExecutorCache) LoadOrStoreInfos(info api.FileInfo, loader func(info api.FileInfo) (*template.Executor, error), infos ...api.FileInfo) (*template.Executor, error) {
-	infos = append([]api.FileInfo{info}, infos...)
+func (ec *ExecutorCache) LoadOrStoreInfos(info assetfsapi.FileInfo, loader func(info assetfsapi.FileInfo) (*template.Executor, error), infos ...assetfsapi.FileInfo) (*template.Executor, error) {
+	infos = append([]assetfsapi.FileInfo{info}, infos...)
 	for _, info := range infos {
 		v, ok := ec.data.Load(info.RealPath())
 		if ok && v != nil {

@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"github.com/moisespsena/template/funcs"
-	"text/template"
 	"strings"
-)
+	"text/template"
+	"time"
 
+	"github.com/vjeantet/jodaTime"
+
+	"github.com/moisespsena/template/funcs"
+)
 
 var builtins = funcs.FuncMap{
 	"and":      and,
@@ -28,6 +31,9 @@ var builtins = funcs.FuncMap{
 	"println":  fmt.Sprintln,
 	"urlquery": template.URLQueryEscaper,
 	"contains": contains,
+	"to_time":  toTime,
+	"timef":    timeFormat,
+	"default":  defaultValue,
 
 	// Comparisons
 	"eq": eq, // ==
@@ -40,7 +46,7 @@ var builtins = funcs.FuncMap{
 
 var builtinFuncs *funcs.FuncValues
 
-func init()  {
+func init() {
 	fcs, err := funcs.CreateValuesFunc(builtins)
 	if err != nil {
 		panic(err)
@@ -48,7 +54,6 @@ func init()  {
 
 	builtinFuncs = fcs
 }
-
 
 // prepareArg checks if value can be used as an argument of type argType, and
 // converts an invalid value to appropriate zero if possible.
@@ -472,4 +477,53 @@ func ge(arg1, arg2 reflect.Value) (bool, error) {
 		return false, err
 	}
 	return !lessThan, nil
+}
+
+// toTime parse object as time
+func toTime(item interface{}) (t time.Time, err error) {
+	v := reflect.ValueOf(item)
+	if !v.IsValid() {
+		return t, fmt.Errorf("toTime of untyped nil")
+	}
+	v, isNil := indirect(v)
+	if isNil {
+		return t, fmt.Errorf("toTime of nil pointer")
+	}
+	var ok bool
+	if t, ok = v.Interface().(time.Time); ok {
+		return
+	}
+	return t, fmt.Errorf("toTime of type %s", v.Type())
+}
+
+// timeFormat format time object
+func timeFormat(item interface{}, layout string, defaul ...string) (vs string, err error) {
+	if len(defaul) > 0 {
+		vs = defaul[0]
+	}
+	var t time.Time
+	v := reflect.ValueOf(item)
+	if !v.IsValid() {
+		return
+	}
+	v, isNil := indirect(v)
+	if isNil {
+		return
+	}
+	var ok bool
+	if t, ok = v.Interface().(time.Time); ok {
+		vs = jodaTime.Format(layout, t)
+		return
+	}
+	return
+}
+
+// defaultValue return first not empty value
+func defaultValue(item ...interface{}) interface{} {
+	for _, item := range item {
+		if truth(reflect.ValueOf(item)) {
+			return item
+		}
+	}
+	return nil
 }

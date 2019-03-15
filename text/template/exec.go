@@ -13,7 +13,6 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
-
 	"unicode"
 
 	"github.com/moisespsena/template/funcs"
@@ -312,7 +311,7 @@ func isTrue(val reflect.Value) (truth, ok bool) {
 		truth = val.Bool()
 	case reflect.Complex64, reflect.Complex128:
 		truth = val.Complex() != 0
-	case reflect.Chan, reflect.Func, reflect.Ptr, reflect.Interface:
+	case reflect.Chan, reflect.Func:
 		truth = !val.IsNil()
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		truth = val.Int() != 0
@@ -320,8 +319,19 @@ func isTrue(val reflect.Value) (truth, ok bool) {
 		truth = val.Float() != 0
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		truth = val.Uint() != 0
+	case reflect.Ptr, reflect.Interface:
+		if val.IsNil() {
+			truth = false
+		} else {
+			return isTrue(val.Elem())
+		}
 	case reflect.Struct:
-		truth = true // Struct values are always true.
+		switch vt := val.Interface().(type) {
+		case interface{ IsZero() bool }:
+			truth = !vt.IsZero()
+		default:
+			truth = true // Struct values are always true.
+		}
 	default:
 		return
 	}
