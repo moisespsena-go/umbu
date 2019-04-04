@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/moisespsena/go-assetfs/assetfsapi"
+	"github.com/moisespsena-go/assetfs/assetfsapi"
 	"github.com/moisespsena/template/text/template"
 )
 
