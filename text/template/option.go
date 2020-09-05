@@ -14,7 +14,7 @@ type missingKeyAction int
 const (
 	mapInvalid   missingKeyAction = iota // Return an invalid reflect.Value.
 	mapZeroValue                         // Return the zero value for the map element.
-	mapError                             // Error out
+	mapError                             // error out
 )
 
 type option struct {

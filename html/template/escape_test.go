@@ -885,14 +885,14 @@ func TestErrors(t *testing.T) {
 			"",
 		},
 		{
-			"{{range .Items}}<a>{{end}}",
+			"{{range .Fields}}<a>{{end}}",
 			"",
 		},
 		{
-			"<a href='/foo?{{range .Items}}&{{.K}}={{.V}}{{end}}'>",
+			"<a href='/foo?{{range .Fields}}&{{.K}}={{.V}}{{end}}'>",
 			"",
 		},
-		// Error cases.
+		// error cases.
 		{
 			"{{if .Cond}}<a{{end}}",
 			"z:1:5: {{if}} branches",
@@ -920,11 +920,11 @@ func TestErrors(t *testing.T) {
 			"z:2:7: {{with}} branches",
 		},
 		{
-			"{{range .Items}}<a{{end}}",
+			"{{range .Fields}}<a{{end}}",
 			`z:1: on range loop re-entry: "<" in attribute name: "<a"`,
 		},
 		{
-			"\n{{range .Items}} x='<a{{end}}",
+			"\n{{range .Fields}} x='<a{{end}}",
 			"z:2:8: on range loop re-entry: {{range}} branches",
 		},
 		{

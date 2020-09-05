@@ -242,7 +242,7 @@ func TestAddParseTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Add a new parse tree.
-	tree, err := parse.Parse("cloneText3", cloneText3, "", "", nil, builtins)
+	tree, err := parse.Parse("cloneText3", cloneText3, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestAddParseTree(t *testing.T) {
 func TestAddParseTreeToUnparsedTemplate(t *testing.T) {
 	master := "{{define \"master\"}}{{end}}"
 	tmpl := New("master")
-	tree, err := parse.Parse("master", master, "", "", nil)
+	tree, err := parse.Parse("master", master, "", "")
 	if err != nil {
 		t.Fatalf("unexpected parse err: %v", err)
 	}

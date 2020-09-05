@@ -245,7 +245,6 @@ var parseTests = []parseTest{
 	{"multiple else", "{{if .X}}1{{else}}2{{else}}3{{end}}", hasError, ""},
 	{"missing end", "hello{{range .x}}", hasError, ""},
 	{"missing end after else", "hello{{range .x}}{{else}}", hasError, ""},
-	{"undefined function", "hello{{undefined}}", hasError, ""},
 	{"undefined variable", "{{$x}}", hasError, ""},
 	{"variable undefined after end", "{{with $x := 4}}{{end}}{{$x}}", hasError, ""},
 	{"variable undefined in template", "{{template $v}}", hasError, ""},
@@ -288,6 +287,16 @@ var parseTests = []parseTest{
 	{"empty pipeline", `{{printf "%d" ( ) }}`, hasError, ""},
 	// Missing pipeline in block
 	{"block definition", `{{block "foo"}}hello{{end}}`, hasError, ""},
+	// Arg block
+	{"arg", "{{arg | func 1}}arg value{{end}}", noError,
+		`{{arg | func 1}}"arg value"{{end}}`},
+	{"arg with dot", "{{arg . | func 1}}dot value: {{.}}{{end}}", noError,
+		`{{arg . | func 1}}"dot value: "{{.}}{{end}}`},
+	{"arg with var", "{{$x := 2}}{{arg $x | func 1}}x value: {{.}}{{end}}", noError,
+		`{{$x := 2}}{{arg $x | func 1}}"x value: "{{.}}{{end}}`},
+	// wrap block
+	{"wrap", "{{wrap}}arg value{{end}}", noError,
+		`{{wrap}}"arg value"{{end}}`},
 }
 
 var builtins = map[string]interface{}{
@@ -298,7 +307,7 @@ func testParse(doCopy bool, t *testing.T) {
 	textFormat = "%q"
 	defer func() { textFormat = "%s" }()
 	for _, test := range parseTests {
-		tmpl, err := New(test.name).Parse(test.input, "", "", make(map[string]*Tree), builtins)
+		tmpl, err := New(test.name).Parse(test.input, "", "", make(map[string]*Tree))
 		switch {
 		case err == nil && !test.ok:
 			t.Errorf("%q: expected error; got none", test.name)
@@ -355,7 +364,7 @@ func TestIsEmpty(t *testing.T) {
 		t.Errorf("nil tree is not empty")
 	}
 	for _, test := range isEmptyTests {
-		tree, err := New("root").Parse(test.input, "", "", make(map[string]*Tree), nil)
+		tree, err := New("root").Parse(test.input, "", "", make(map[string]*Tree))
 		if err != nil {
 			t.Errorf("%q: unexpected error: %v", test.name, err)
 			continue
@@ -367,7 +376,7 @@ func TestIsEmpty(t *testing.T) {
 }
 
 func TestErrorContextWithTreeCopy(t *testing.T) {
-	tree, err := New("root").Parse("{{if true}}{{end}}", "", "", make(map[string]*Tree), nil)
+	tree, err := New("root").Parse("{{if true}}{{end}}", "", "", make(map[string]*Tree))
 	if err != nil {
 		t.Fatalf("unexpected tree parse failure: %v", err)
 	}
@@ -392,9 +401,6 @@ var errorTests = []parseTest{
 		"line1\n{{define `x`}}line2\n{{",
 		hasError, `unclosed2:3: unexpected unclosed action in command`},
 	// Specific errors.
-	{"function",
-		"{{foo}}",
-		hasError, `function "foo" not defined`},
 	{"comment",
 		"{{/*}}",
 		hasError, `unclosed comment`},
@@ -469,7 +475,7 @@ func TestBlock(t *testing.T) {
 		inner = `bar{{.}}baz`
 	)
 	treeSet := make(map[string]*Tree)
-	tmpl, err := New("outer").Parse(input, "", "", treeSet, nil)
+	tmpl, err := New("outer").Parse(input, "", "", treeSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +494,7 @@ func TestBlock(t *testing.T) {
 func TestLineNum(t *testing.T) {
 	const count = 100
 	text := strings.Repeat("{{printf 1234}}\n", count)
-	tree, err := New("bench").Parse(text, "", "", make(map[string]*Tree), builtins)
+	tree, err := New("bench").Parse(text, "", "", make(map[string]*Tree))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +518,7 @@ func TestLineNum(t *testing.T) {
 func BenchmarkParseLarge(b *testing.B) {
 	text := strings.Repeat("{{1234}}\n", 10000)
 	for i := 0; i < b.N; i++ {
-		_, err := New("bench").Parse(text, "", "", make(map[string]*Tree), builtins)
+		_, err := New("bench").Parse(text, "", "", make(map[string]*Tree))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -44,7 +44,7 @@ var builtins = funcs.FuncMap{
 	"ne": ne, // !=
 }
 
-var builtinFuncs *funcs.FuncValues
+var builtinFuncs funcs.FuncValues
 
 func init() {
 	fcs, err := funcs.CreateValuesFunc(builtins)

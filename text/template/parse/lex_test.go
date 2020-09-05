@@ -192,7 +192,7 @@ var lexTests = []lexTest{
 		tRight,
 		tEOF,
 	}},
-	{"keywords", "{{range if else end with}}", []item{
+	{"keywords", "{{range if else end with wrap begin after}}", []item{
 		tLeft,
 		mkItem(itemRange, "range"),
 		tSpace,
@@ -203,6 +203,12 @@ var lexTests = []lexTest{
 		mkItem(itemEnd, "end"),
 		tSpace,
 		mkItem(itemWith, "with"),
+		tSpace,
+		mkItem(itemWrap, "wrap"),
+		tSpace,
+		mkItem(itemBegin, "begin"),
+		tSpace,
+		mkItem(itemAfter, "after"),
 		tRight,
 		tEOF,
 	}},
@@ -514,7 +520,7 @@ func TestShutdown(t *testing.T) {
 func (t *Tree) parseLexer(lex *lexer) (tree *Tree, err error) {
 	defer t.recover(&err)
 	t.ParseName = t.Name
-	t.startParse(nil, lex, map[string]*Tree{})
+	t.startParse(lex, map[string]*Tree{})
 	t.parse()
 	t.add()
 	t.stopParse()

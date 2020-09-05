@@ -10,9 +10,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
-	"reflect"
-	"errors"
-	"runtime/debug"
 )
 
 // Functions and methods to parse templates.
@@ -129,23 +126,4 @@ func parseGlob(t *Template, pattern string) (*Template, error) {
 		return nil, fmt.Errorf("template: pattern matches no files: %#q", pattern)
 	}
 	return parseFiles(t, filenames...)
-}
-
-func funCall(fun reflect.Value, argv[]reflect.Value) (r []reflect.Value, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			switch x := r.(type) {
-			case string:
-				err = errors.New(x)
-			case error:
-				err = x
-			default:
-				err = fmt.Errorf("Unknown panic: %s", r)
-			}
-			if _, ok := err.(*ErrorWithTrace); !ok {
-				err = &ErrorWithTrace{err.Error(), debug.Stack()}
-			}
-		}
-	}()
-	return fun.Call(argv), nil
 }

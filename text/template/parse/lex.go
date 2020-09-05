@@ -42,7 +42,18 @@ const (
 	itemChar                         // printable ASCII character; grab bag for comma etc.
 	itemCharConstant                 // character constant
 	itemComplex                      // complex constant (1+2i); imaginary is just a number
-	itemColonEquals                  // colon-equals (':=') introducing a declaration
+
+	// variable and math operators
+	itemMathExpr            // mathematical expression
+	itemColonEquals         // colon-equals (':=') introducing a declaration
+	itemPlusEquals          // plus-equals ('+=') concat or sum previous declaration
+	itemSubEquals           // sub-equals ('-=') subtract previous declaration
+	itemPowEquals           // pow-equals ('^=') pow previous declaration
+	itemMultiplicatorEquals // asterisk-equals ('*=') multiplicy previous declaration
+	itemDivEquals           // div-equals ('/=') div previous declaration
+	itemModEquals           // mod-equals ('%=') mod previous declaration
+	itemFloorEquals         // floor-equals ('\=') floor previous declaration
+
 	itemEOF
 	itemField      // alphanumeric identifier starting with '.'
 	itemIdentifier // alphanumeric identifier not starting with '.'
@@ -58,30 +69,40 @@ const (
 	itemText       // plain text
 	itemVariable   // variable starting with '$', such as '$' or  '$1' or '$hello'
 	// Keywords appear after all the rest.
-	itemKeyword     // used only to delimit the keywords
-	itemBlock       // block keyword
-	itemDot         // the cursor, spelled '.'
-	itemDefine      // define keyword
-	itemElse        // else keyword
-	itemEnd         // end keyword
-	itemIf          // if keywordVar
-	itemNil         // the untyped nil constant, easiest to treat as a keyword
-	itemRange       // range keyword
-	itemTemplate    // template keyword
-	itemWith        // with keyword
+	itemKeyword  // used only to delimit the keywords
+	itemBlock    // block keyword
+	itemDot      // the cursor, spelled '.'
+	itemDefine   // define keyword
+	itemElse     // else keyword
+	itemEnd      // end keyword
+	itemIf       // if keywordVar
+	itemNil      // the untyped nil constant, easiest to treat as a keyword
+	itemRange    // range keyword
+	itemTemplate // template keyword
+	itemWith     // with keyword
+	itemArg      // arg keyword
+
+	itemWrap
+	itemBegin
+	itemAfter
+	itemPtr
 )
 
 var key = map[string]itemType{
-	".":           itemDot,
-	"block":       itemBlock,
-	"define":      itemDefine,
-	"else":        itemElse,
-	"end":         itemEnd,
-	"if":          itemIf,
-	"range":       itemRange,
-	"nil":         itemNil,
-	"template":    itemTemplate,
-	"with":        itemWith,
+	".":        itemDot,
+	"block":    itemBlock,
+	"define":   itemDefine,
+	"else":     itemElse,
+	"end":      itemEnd,
+	"if":       itemIf,
+	"range":    itemRange,
+	"nil":      itemNil,
+	"template": itemTemplate,
+	"with":     itemWith,
+	"arg":      itemArg,
+	"wrap":     itemWrap,
+	"begin":    itemBegin,
+	"after":    itemAfter,
 }
 
 const eof = -1
@@ -375,6 +396,71 @@ func lexInsideAction(l *lexer) stateFn {
 			return l.errorf("expected :=")
 		}
 		l.emit(itemColonEquals)
+	case r == '+':
+		switch l.next() {
+		case '=':
+			l.emit(itemPlusEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			l.backup()
+			return lexNumber
+		}
+	case r == '-':
+		switch l.next() {
+		case '=':
+			l.emit(itemSubEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			l.backup()
+			return lexNumber
+		}
+	case r == '*':
+		switch l.next() {
+		case '=':
+			l.emit(itemMultiplicatorEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			return l.errorf("expected left space")
+		}
+	case r == '/':
+		switch l.next() {
+		case '=':
+			l.emit(itemDivEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			return l.errorf("expected left space")
+		}
+	case r == '%':
+		switch l.next() {
+		case '=':
+			l.emit(itemModEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			return l.errorf("expected left space")
+		}
+	case r == '\\':
+		switch l.next() {
+		case '=':
+			l.emit(itemFloorEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			return l.errorf("expected left space")
+		}
+	case r == '^':
+		switch l.next() {
+		case '=':
+			l.emit(itemPowEquals)
+		case ' ':
+			l.emit(itemMathExpr)
+		default:
+			return l.errorf("expected left space")
+		}
 	case r == '|':
 		l.emit(itemPipe)
 	case r == '"':
@@ -394,7 +480,9 @@ func lexInsideAction(l *lexer) stateFn {
 			}
 		}
 		fallthrough // '.' can start a number.
-	case r == '+' || r == '-' || ('0' <= r && r <= '9'):
+	case r == '&':
+		l.emit(itemPtr)
+	case '0' <= r && r <= '9':
 		l.backup()
 		return lexNumber
 	case isAlphaNumeric(r):

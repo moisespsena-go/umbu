@@ -21,7 +21,7 @@ func Example() {
 		<title>{{.Title}}</title>
 	</head>
 	<body>
-		{{range .Items}}<div>{{ . }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
+		{{range .Fields}}<div>{{ . }}</div>{{else}}<div><strong>no rows</strong></div>{{end}}
 	</body>
 </html>`
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"io/ioutil"
 	"reflect"
 	"strings"
@@ -31,7 +32,7 @@ type T struct {
 	// Struct with String method.
 	V0     V
 	V1, V2 *V
-	// Struct with Error method.
+	// Struct with error method.
 	W0     W
 	W1, W2 *W
 	// Slices
@@ -254,7 +255,7 @@ var execTests = []execTest{
 	// Ideal constants.
 	{"ideal int", "{{typeOf 3}}", "int", 0, true},
 	{"ideal float", "{{typeOf 1.0}}", "float64", 0, true},
-	{"ideal exp float", "{{typeOf 1e1}}", "float64", 0, true},
+	{"ideal expr float", "{{typeOf 1e1}}", "float64", 0, true},
 	{"ideal complex", "{{typeOf 1i}}", "complex128", 0, true},
 	{"ideal int", "{{typeOf " + bigInt + "}}", "int", 0, true},
 	{"ideal too big", "{{typeOf " + bigUint + "}}", "", 0, false},
@@ -298,10 +299,10 @@ var execTests = []execTest{
 	{"&V{7777}.String()", "-{{.V1}}-", "-<7777>-", tVal, true},
 	{"(*V)(nil).String()", "-{{.V2}}-", "-nilV-", tVal, true},
 
-	// Type with Error method.
-	{"W{888}.Error()", "-{{.W0}}-", "-[888]-", tVal, true},
-	{"&W{999}.Error()", "-{{.W1}}-", "-[999]-", tVal, true},
-	{"(*W)(nil).Error()", "-{{.W2}}-", "-nilW-", tVal, true},
+	// Type with error method.
+	{"W{888}.error()", "-{{.W0}}-", "-[888]-", tVal, true},
+	{"&W{999}.error()", "-{{.W1}}-", "-[999]-", tVal, true},
+	{"(*W)(nil).error()", "-{{.W2}}-", "-nilW-", tVal, true},
 
 	// Pointers.
 	{"*int", "{{.PI}}", "23", tVal, true},
@@ -490,6 +491,7 @@ var execTests = []execTest{
 	{"range empty nil", "{{range .Empty0}}-{{.}}-{{end}}", "", tVal, true},
 	{"range $x SI", "{{range $x := .SI}}<{{$x}}>{{end}}", "<3><4><5>", tVal, true},
 	{"range $x $y SI", "{{range $x, $y := .SI}}<{{$x}}={{$y}}>{{end}}", "<0=3><1=4><2=5>", tVal, true},
+	{"range $last $x $y SI", "{{range $last, $x, $y := .SI}}<{{$x}}={{$y}}>{{if not $last}},{{end}}{{end}}", "<0=3>,<1=4>,<2=5>", tVal, true},
 	{"range $x MSIone", "{{range $x := .MSIone}}<{{$x}}>{{end}}", "<1>", tVal, true},
 	{"range $x $y MSIone", "{{range $x, $y := .MSIone}}<{{$x}}={{$y}}>{{end}}", "<one=1>", tVal, true},
 	{"range $x PSI", "{{range $x := .PSI}}<{{$x}}>{{end}}", "<21><22><23>", tVal, true},
@@ -501,7 +503,7 @@ var execTests = []execTest{
 	{"or as if true", `{{or .SI "slice is empty"}}`, "[3 4 5]", tVal, true},
 	{"or as if false", `{{or .SIEmpty "slice is empty"}}`, "slice is empty", tVal, true},
 
-	// Error handling.
+	// error handling.
 	{"error method, error", "{{.MyError true}}", "", tVal, false},
 	{"error method, no error", "{{.MyError false}}", "false", tVal, true},
 
@@ -568,6 +570,11 @@ var execTests = []execTest{
 	{"bug17c", "{{len .NonEmptyInterfacePtS}}", "2", tVal, true},
 	{"bug17d", "{{index .NonEmptyInterfacePtS 0}}", "a", tVal, true},
 	{"bug17e", "{{range .NonEmptyInterfacePtS}}-{{.}}-{{end}}", "-a--b-", tVal, true},
+
+	// Arg
+	{"arg1", "{{arg | echo}}arg value{{end}}", "arg value", nil, true},
+	{"arg2", `{{arg "x" | echo}}arg value: {{.}}{{end}}`, "arg value: x", nil, true},
+	{"arg3", `{{arg (add 100 59) | join "=" "count result"}}{{.}}{{end}}`, "count result=159", nil, true},
 }
 
 func zeroArgs() string {
@@ -628,6 +635,14 @@ func echo(arg interface{}) interface{} {
 	return arg
 }
 
+func join(sep string, arg ...interface{}) string {
+	var r = make([]string, len(arg))
+	for i, arg := range arg {
+		r[i] = fmt.Sprint(arg)
+	}
+	return strings.Join(r, sep)
+}
+
 func makemap(arg ...string) map[string]string {
 	if len(arg)%2 != 0 {
 		panic("bad makemap")
@@ -654,6 +669,7 @@ func testExecute(execTests []execTest, template *Template, t *testing.T) {
 		"count":       count,
 		"dddArg":      dddArg,
 		"echo":        echo,
+		"join":        join,
 		"makemap":     makemap,
 		"mapOfThree":  mapOfThree,
 		"oneArg":      oneArg,
@@ -669,16 +685,17 @@ func testExecute(execTests []execTest, template *Template, t *testing.T) {
 		var tmpl *Template
 		var err error
 		if template == nil {
-			tmpl, err = New(test.name).Funcs(funcs).Parse(test.input)
+			tmpl, err = New(test.name).Parse(test.input)
 		} else {
-			tmpl, err = template.New(test.name).Funcs(funcs).Parse(test.input)
+			tmpl, err = template.New(test.name).Parse(test.input)
 		}
+
 		if err != nil {
 			t.Errorf("%s: parse error: %s", test.name, err)
 			continue
 		}
 		b.Reset()
-		err = tmpl.Execute(b, test.data)
+		err = tmpl.Executor(funcs).Execute(b, test.data)
 		switch {
 		case !test.ok && err == nil:
 			t.Errorf("%s: expected error; got none", test.name)
@@ -785,7 +802,7 @@ func TestExecError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	const want = `template: top:7:20: executing "three" at <index "hi" $>: error calling index: index out of range: 5`
+	const want = `template: 'top':7:20: executing "three" at <index "hi" $>: error calling index: index out of range: 5`
 	got := err.Error()
 	if got != want {
 		t.Errorf("expected\n%q\ngot\n%q", want, got)
@@ -804,7 +821,7 @@ func TestJSEscaping(t *testing.T) {
 		{`<html>`, `\x3Chtml\x3E`},
 	}
 	for _, tc := range testCases {
-		s := JSEscapeString(tc.in)
+		s := template.JSEscapeString(tc.in)
 		if s != tc.exp {
 			t.Errorf("JS escaping [%s] got [%s] want [%s]", tc.in, s, tc.exp)
 		}
@@ -920,9 +937,9 @@ func TestMessageForExecuteEmpty(t *testing.T) {
 		t.Fatal("expected initial error")
 	}
 	got := err.Error()
-	want := `template: empty: "empty" is an incomplete or empty template`
+	want := `template: 'empty': 'empty' is an incomplete or empty template`
 	if got != want {
-		t.Errorf("expected error %s got %s", want, got)
+		t.Errorf("expected error `%s` got `%s`", want, got)
 	}
 	// Add a non-empty template to check that the error is helpful.
 	tests, err := New("").Parse(testTemplates)
@@ -935,9 +952,9 @@ func TestMessageForExecuteEmpty(t *testing.T) {
 		t.Fatal("expected second error")
 	}
 	got = err.Error()
-	want = `template: empty: "empty" is an incomplete or empty template`
+	want = `template: 'empty': 'empty' is an incomplete or empty template`
 	if got != want {
-		t.Errorf("expected error %s got %s", want, got)
+		t.Errorf("expected error `%s` got `%s`", want, got)
 	}
 	// Make sure we can execute the secondary.
 	err = tmpl.ExecuteTemplate(&b, "secondary", 0)
@@ -1147,9 +1164,10 @@ func TestMissingMapKey(t *testing.T) {
 	}
 	// same Option, but now a nil interface: ask for an error
 	err = tmpl.Execute(&b, nil)
-	t.Log(err)
 	if err == nil {
 		t.Errorf("expected error for nil-interface; got none")
+	} else if !strings.Contains(err.Error(), `no entry for key "x"`) {
+		t.Errorf("unexpected error: `%s`", err.Error())
 	}
 }
 
@@ -1186,8 +1204,9 @@ func TestExecuteGivesExecError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error; got none")
 	}
-	if err.Error() != alwaysErrorText {
-		t.Errorf("expected %q error; got %q", alwaysErrorText, err)
+
+	if expected := "template 'X': {" + alwaysErrorText + "}"; err.Error() != expected {
+		t.Errorf("expected `%s` error; got `%s`", expected, err)
 	}
 	// This one should be an ExecError.
 	tmpl, err = New("X").Parse("hello, {{.X.Y}}")
@@ -1198,63 +1217,14 @@ func TestExecuteGivesExecError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error; got none")
 	}
-	eerr, ok := err.(ExecError)
+	eerr, ok := GetExecError(err)
 	if !ok {
-		t.Fatalf("did not expect ExecError %s", eerr)
+		t.Fatalf("did not expect ExecError `%s`", eerr)
 	}
 	expect := "field X in type int"
 	if !strings.Contains(err.Error(), expect) {
 		t.Errorf("expected %q; got %q", expect, err)
 	}
-}
-
-func funcNameTestFunc() int {
-	return 0
-}
-
-func TestGoodFuncNames(t *testing.T) {
-	names := []string{
-		"_",
-		"a",
-		"a1",
-		"a1",
-		"Ӵ",
-	}
-	for _, name := range names {
-		tmpl := New("X").Funcs(
-			FuncMap{
-				name: funcNameTestFunc,
-			},
-		)
-		if tmpl == nil {
-			t.Fatalf("nil result for %q", name)
-		}
-	}
-}
-
-func TestBadFuncNames(t *testing.T) {
-	names := []string{
-		"",
-		"2",
-		"a-b",
-	}
-	for _, name := range names {
-		testBadFuncName(name, t)
-	}
-}
-
-func testBadFuncName(name string, t *testing.T) {
-	defer func() {
-		recover()
-	}()
-	New("X").Funcs(
-		FuncMap{
-			name: funcNameTestFunc,
-		},
-	)
-	// If we get here, the name did not cause a panic, which is how Funcs
-	// reports an error.
-	t.Errorf("%q succeeded incorrectly as function name", name)
 }
 
 func TestBlock(t *testing.T) {

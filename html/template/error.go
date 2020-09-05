@@ -9,7 +9,7 @@ import (
 	"github.com/moisespsena/template/text/template/parse"
 )
 
-// Error describes a problem encountered during template Escaping.
+// error describes a problem encountered during template Escaping.
 type Error struct {
 	// ErrorCode describes the kind of error.
 	ErrorCode ErrorCode

@@ -226,9 +226,9 @@ func TestCSSValueFilter(t *testing.T) {
 		{`-expr\0ession(alert(1337))`, "ZgotmplZ"},
 		{`-express\69on(alert(1337))`, "ZgotmplZ"},
 		{`-express\69 on(alert(1337))`, "ZgotmplZ"},
-		{`-exp\72 ession(alert(1337))`, "ZgotmplZ"},
-		{`-exp\52 ession(alert(1337))`, "ZgotmplZ"},
-		{`-exp\000052 ession(alert(1337))`, "ZgotmplZ"},
+		{`-expr\72 ession(alert(1337))`, "ZgotmplZ"},
+		{`-expr\52 ession(alert(1337))`, "ZgotmplZ"},
+		{`-expr\000052 ession(alert(1337))`, "ZgotmplZ"},
 		{`-expre\0000073sion`, "-expre\x073sion"},
 		{`@import url evil.css`, "ZgotmplZ"},
 	}

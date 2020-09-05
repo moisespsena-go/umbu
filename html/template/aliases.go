@@ -5,11 +5,15 @@ import (
 	"github.com/moisespsena/template/text/template"
 )
 
-type Executor = template.Executor
-type DataFuncs = funcs.DataFuncs
-type FuncMap = funcs.FuncMap
-type FuncValues = funcs.FuncValues
-type ErrorWithTrace = template.ErrorWithTrace
-type LocalData = template.LocalData
+type (
+	Executor        = template.Executor
+	DataFuncs       = funcs.DataFuncs
+	FuncMap         = funcs.FuncMap
+	FuncMapSlice    = funcs.FuncMapSlice
+	FuncValues      = funcs.FuncValues
+	FuncValuesSlice = funcs.FuncValuesSlice
+	LocalData       = template.LocalData
+	State           = template.State
+)
 
 var NewDataFuncs = funcs.NewDataFuncs

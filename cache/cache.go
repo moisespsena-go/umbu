@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/moisespsena/go-assetfs/assetfsapi"
+	oscommon "github.com/moisespsena-go/os-common"
+
+	"github.com/moisespsena-go/assetfs/assetfsapi"
 	"github.com/moisespsena/template/text/template"
 )
 
@@ -76,6 +78,9 @@ func (ec *ExecutorCache) LoadOrStoreNames(name string, loader func(name string) 
 		t, err := loader(name)
 
 		if err != nil {
+			if oscommon.IsNotFound(err) {
+				continue
+			}
 			return nil, err
 		}
 
@@ -86,7 +91,7 @@ func (ec *ExecutorCache) LoadOrStoreNames(name string, loader func(name string) 
 			return t, nil
 		}
 	}
-	return nil, nil
+	return nil, oscommon.ErrNotFound(name)
 }
 
 func (ec *ExecutorCache) LoadOrStoreInfos(info assetfsapi.FileInfo, loader func(info assetfsapi.FileInfo) (*template.Executor, error), infos ...assetfsapi.FileInfo) (*template.Executor, error) {

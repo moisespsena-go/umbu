@@ -18,7 +18,7 @@ This package wraps package text/template so you can share its template API
 to parse and execute HTML templates safely.
 
   tmpl, err := template.New("name").Parse(...)
-  // Error checking elided
+  // error checking elided
   err = tmpl.Execute(out, data)
 
 If successful, tmpl will now be injection-safe. Otherwise, err is an error

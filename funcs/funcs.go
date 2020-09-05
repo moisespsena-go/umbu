@@ -1,10 +1,11 @@
 package funcs
 
 import (
+	"fmt"
 	"reflect"
 	"unicode"
-	"fmt"
-	"text/template"
+
+	"github.com/moisespsena-go/maps"
 )
 
 // FuncMap is the type of the map defining the mapping from names to functions.
@@ -18,11 +19,13 @@ import (
 // apply to arguments of arbitrary type can use parameters of type interface{} or
 // of type reflect.Value. Similarly, functions meant to return a result of arbitrary
 // type can return interface{} or reflect.Value.
-type FuncMap = template.FuncMap
+type FuncMap = maps.MapSI
+
+type FuncMapSlice = maps.MapSiSlice
 
 type FuncValue struct {
-	f interface{}
-	v reflect.Value
+	f   interface{}
+	v   reflect.Value
 	ctx *FuncValue
 }
 
@@ -68,14 +71,32 @@ func (fv *FuncValue) Caller(context *Context) *ContextCaller {
 	return &ContextCaller{f: fv.ContextualValue(context.Value)}
 }
 
-type FuncValues struct {
-	data []map[string]*FuncValue
+type FuncValuesSlice []FuncValues
+
+func (this *FuncValuesSlice) Append(m ...FuncValues) {
+	*this = append(*this, m...)
 }
+
+func (this *FuncValuesSlice) AppendSlice(m ...[]map[string]*FuncValue) {
+	for _, m := range m {
+		*this = append(*this, m)
+	}
+}
+
+func (this *FuncValuesSlice) AppendMap(m ...map[string]*FuncValue) {
+	this.Append(FuncValues(m))
+}
+
+type FuncValues []map[string]*FuncValue
 
 var ContextType = reflect.TypeOf(&Context{})
 
-func (v *FuncValues) Get(name string) *FuncValue  {
-	for _, m := range v.data {
+func (v FuncValues) Get(name string) *FuncValue {
+	if len(v) == 0 {
+		return nil
+	}
+
+	for _, m := range v {
 		if f := m[name]; f != nil {
 			return f
 		}
@@ -83,7 +104,7 @@ func (v *FuncValues) Get(name string) *FuncValue  {
 	return nil
 }
 
-func (v *FuncValues) SetPair(name string, f interface{}, vf reflect.Value, check... bool) (err error) {
+func (v *FuncValues) SetPair(name string, f interface{}, vf reflect.Value, check ...bool) (err error) {
 	if checkArg(check) {
 		err = CheckFuncValue(name, vf)
 		if err != nil {
@@ -94,21 +115,21 @@ func (v *FuncValues) SetPair(name string, f interface{}, vf reflect.Value, check
 	return nil
 }
 
-func (v *FuncValues) SetValue(name string, value *FuncValue, check... bool) error {
+func (v *FuncValues) SetValue(name string, value *FuncValue, check ...bool) error {
 	if checkArg(check) {
 		err := CheckFuncValue(name, value.v)
 		if err != nil {
 			return err
 		}
 	}
-	if len(v.data) == 0 {
-		v.data = []map[string]*FuncValue{{}}
+	if len(*v) == 0 {
+		*v = []map[string]*FuncValue{{}}
 	}
-	v.data[0][name] = value
+	(*v)[0][name] = value
 	return nil
 }
 
-func (v *FuncValues) Set(name string, f interface{}, check... bool) error {
+func (v *FuncValues) Set(name string, f interface{}, check ...bool) error {
 	return v.SetPair(name, f, reflect.ValueOf(f), check...)
 }
 
@@ -133,7 +154,7 @@ func (v *FuncValues) GetDefault(name string, f interface{}) interface{} {
 	return fv.f
 }
 
-func (v *FuncValues) Append(funcMaps... FuncMap) error {
+func (v *FuncValues) Append(funcMaps ...FuncMap) error {
 	for _, funcMap := range funcMaps {
 		for name, fn := range funcMap {
 			err := v.Set(name, fn)
@@ -145,55 +166,63 @@ func (v *FuncValues) Append(funcMaps... FuncMap) error {
 	return nil
 }
 
-func (v *FuncValues) AppendValues(items... *FuncValues) {
+func (v *FuncValues) AppendValues(items ...FuncValues) {
 	for _, item := range items {
 		if item != nil {
-			v.data = append(v.data, item.data...)
+			*v = append(*v, item...)
 		}
 	}
 }
 
-func NewValues(items... *FuncValues) *FuncValues {
-	data := []map[string]*FuncValue{{}}
+func (v *FuncValues) Start() *FuncValues {
+	if len(*v) == 0 {
+		*v = []map[string]*FuncValue{{}}
+	}
+	return v
+}
+
+func NewValues(items ...FuncValues) FuncValues {
+	values := FuncValues{{}}
 
 	for _, item := range items {
-		for _, e := range item.data {
+		for _, e := range item {
 			if len(e) > 0 {
-				data = append(data, e)
+				values = append(values, e)
 			}
 		}
 	}
 
-	return &FuncValues{data}
+	return values
 }
 
 type Context struct {
 	Value reflect.Value
-	Funcs *FuncValues
+	Funcs FuncValues
 }
 
 func (ctx *Context) Get(name string) *ContextCaller {
 	return ctx.Funcs.Get(name).Caller(ctx)
 }
 
-func NewContextValue(funcs *FuncValues) reflect.Value {
-	ctx := &Context{Funcs:funcs}
+func NewContextValue(funcs FuncValues) reflect.Value {
+	ctx := &Context{Funcs: funcs}
 	ctx.Value = reflect.ValueOf(ctx)
 	return ctx.Value
 }
 
-var errorType        = reflect.TypeOf((*error)(nil)).Elem()
+var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
 // GoodFunc reports whether the function or method has the right result signature.
 func GoodFunc(typ reflect.Type) bool {
-	// We allow functions with 1 result or 2 results where the second is an error.
-	switch {
-	case typ.NumOut() == 1:
+	// We allow functions with 0 or 1 result or 2 results where the second is an error.
+	switch typ.NumOut() {
+	case 0, 1:
 		return true
-	case typ.NumOut() == 2 && typ.Out(1) == errorType:
-		return true
+	case 2:
+		return typ.NumOut() == 2 && typ.Out(1) == errorType
+	default:
+		return false
 	}
-	return false
 }
 
 // GoodName reports whether the function name is a valid identifier.
@@ -213,16 +242,14 @@ func GoodName(name string) bool {
 	return true
 }
 
-
-func CreateValuesFunc(funcMaps ... FuncMap) (*FuncValues, error) {
-	mv := NewValues()
-	err := mv.Append(funcMaps...)
+func CreateValuesFunc(funcMaps ...FuncMap) (FuncValues, error) {
+	values := NewValues()
+	err := values.Append(funcMaps...)
 	if err != nil {
 		return nil, err
 	}
-	return mv, nil
+	return values, nil
 }
-
 
 func CheckName(name string) error {
 	if !GoodName(name) {
@@ -239,7 +266,7 @@ func CheckFuncValue(name string, vf reflect.Value) error {
 		return fmt.Errorf("value for %q isn't a valid function", name)
 	}
 	if !GoodFunc(vf.Type()) {
-		return fmt.Errorf("can't install method/function %q with %d results", name, vf.Type().NumOut())
+		return fmt.Errorf("can't install method/function %q: bad return type", name)
 	}
 	return nil
 }
@@ -258,28 +285,28 @@ func checkArg(check []bool) bool {
 }
 
 type DataFuncs struct {
-	data        interface{}
-	funcs       *FuncValues
+	data  interface{}
+	funcs FuncValues
 }
 
 func (df *DataFuncs) Data() interface{} {
 	return df.data
 }
 
-func (df *DataFuncs) Funcs(funcs ... FuncMap) error {
+func (df *DataFuncs) Funcs(funcs ...FuncMap) error {
 	return df.funcs.Append(funcs...)
 }
 
-func (df *DataFuncs) FuncsValues(funcsValues ... *FuncValues) {
+func (df *DataFuncs) FuncsValues(funcsValues ...FuncValues) {
 	df.funcs.AppendValues(funcsValues...)
 }
 
-func (df *DataFuncs) GetFuncValues() *FuncValues {
+func (df *DataFuncs) GetFuncValues() FuncValues {
 	return df.funcs
 }
 
 func NewDataFuncs(data interface{}) *DataFuncs {
-	fv := &FuncValues{}
+	var fv FuncValues
 	if df, ok := data.(*DataFuncs); ok {
 		data = df.data
 		fv.AppendValues(df.GetFuncValues())

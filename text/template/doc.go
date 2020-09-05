@@ -220,6 +220,7 @@ value (argument) or a function or method call, possibly with multiple arguments:
 		with the name:
 			function(Argument1, etc.)
 		Functions and function names are described below.
+	Basic Mathematical expressions
 
 A pipeline may be "chained" by separating a sequence of commands with pipeline
 characters '|'. In a chained pipeline, the result of each command is
@@ -237,6 +238,34 @@ A pipeline inside an action may initialize a variable to capture the result.
 The initialization has syntax
 
 	$variable := pipeline
+
+Number Variables
+	$variable := number
+
+	// alias of $variable := $variable + number
+	$variable += number
+
+	// alias of $variable := $variable - number
+	$variable -= number
+
+	// alias of $variable := $variable * number
+	$variable *= number
+
+	// alias of $variable := $variable / number
+	$variable /= number
+
+	// Module: alias of $variable := $variable % number
+	$variable %= number
+
+	// math.Pow: alias of $variable := $variable ^ number
+	$variable ^= number
+
+	// math.Floor: alias of $variable := $variable \ number
+	$variable \= number
+
+String variables concatenetion
+	$variable := "a"
+	$variable += "b"
 
 where $variable is the name of the variable. An action that declares a
 variable produces no output.
@@ -288,6 +317,10 @@ All produce the quoted word "output":
 		A with action that uses the variable in another action.
 	{{with $x := "output"}}{{$x | printf "%q"}}{{end}}
 		The same, but pipelined.
+	{{3 + 2}}
+	{{(3 + (2 * 5)) ^ 3}}
+	{{$x := 3 + (2 * 5)}}
+	{{$x += 3 + ($y * .Count)}}
 
 Functions
 

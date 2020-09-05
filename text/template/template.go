@@ -48,7 +48,6 @@ func (t *Template) FullName() string {
 	return name
 }
 
-
 func (t *Template) SetPath(path string) *Template {
 	t.Path = path
 	return t

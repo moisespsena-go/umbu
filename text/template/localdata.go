@@ -2,17 +2,17 @@ package template
 
 type LocalData map[interface{}]interface{}
 
-func (l LocalData) Merge(m ...map[interface{}]interface{}) {
+func (l *LocalData) Merge(m ...map[interface{}]interface{}) {
 	for _, mv := range m {
 		for k, v := range mv {
-			l[k] = v
+			(*l)[k] = v
 		}
 	}
 }
 
-func (l LocalData) Set(args ...interface{}) string {
+func (l *LocalData) Set(args ...interface{}) string {
 	for i := 0; i < len(args); i += 2 {
-		l[args[i]] = args[i+1]
+		(*l)[args[i]] = args[i+1]
 	}
 	return ""
 }

@@ -8,9 +8,10 @@ import (
 	"bytes"
 	"fmt"
 	"html"
+
+	"github.com/moisespsena/template/funcs"
 	"github.com/moisespsena/template/text/template"
 	"github.com/moisespsena/template/text/template/parse"
-	"github.com/moisespsena/template/funcs"
 )
 
 // escapeTemplate rewrites the named template, which must be
@@ -77,9 +78,9 @@ var builtinsFuncMap = funcs.FuncMap{
 	"_eval_args_":                    evalArgs,
 }
 
-var builtins *funcs.FuncValues
+var builtins funcs.FuncValues
 
-func init()  {
+func init() {
 	fcs, err := funcs.CreateValuesFunc(builtinsFuncMap)
 	if err != nil {
 		panic(err)
@@ -735,7 +736,7 @@ func contextAfterText(c context, s []byte) (context, int) {
 	if c.delim == delimSpaceOrTagEnd {
 		// http://www.w3.org/TR/html5/syntax.html#attribute-value-(unquoted)-state
 		// lists the runes below as error characters.
-		// Error out because HTML parsers may differ on whether
+		// error out because HTML parsers may differ on whether
 		// "<a id= onclick=f("     ends inside id's or onclick's value,
 		// "<a class=`foo "        ends inside a value,
 		// "<a style=font:'Arial'" needs open-quote fixup.

@@ -2,59 +2,106 @@ package template
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"reflect"
-	"runtime/debug"
+	"strings"
 
+	"github.com/moisespsena-go/tracederror"
 	"github.com/moisespsena/template/funcs"
 )
 
 type Executor struct {
-	parent          *Executor
-	template        *Template
-	funcs           *funcs.FuncValues
-	writeError      int
-	Local           *LocalData
-	notCaptureError bool
+	StateOptions
+	parent         *Executor
+	template       *Template
+	funcs          funcs.FuncValues
+	writeError     int
+	Local          LocalData
+	noCaptureError bool
+	Context        context.Context
+	super          *State
 }
 
-func (te *Executor) Template() *Template {
-	return te.template
+func (this *Executor) NoCaptureError() {
+	this.noCaptureError = true
 }
 
-func (te *Executor) Parent() *Executor {
-	return te.parent
+func (this *Executor) SetSuper(super *State) {
+	this.super = super
+	if super != nil {
+		this.noCaptureError = true
+	}
 }
 
-func (te *Executor) GetFuncs() *funcs.FuncValues {
-	return te.funcs
+func (this *Executor) FullPath() (pth TemplatePath) {
+	s := this.super
+	for s != nil {
+		var p = StateLocation{
+			TemplateName: s.tmpl.name,
+			TemplatePath: s.tmpl.Path,
+		}
+
+		if s.node != nil {
+			p.Location, p.Context = s.tmpl.ErrorContext(s.node)
+			p.Location = strings.TrimPrefix(p.Location, "'"+p.TemplateName+"':")
+		}
+
+		pth.pth = append(pth.pth, p)
+		s = s.e.super
+	}
+
+	for i := 0; i < len(pth.pth)/2; i++ {
+		j := len(pth.pth) - i - 1
+		pth.pth[i], pth.pth[j] = pth.pth[j], pth.pth[i]
+	}
+
+	pth.pth = append(pth.pth, StateLocation{
+		TemplateName: this.template.name,
+		TemplatePath: this.template.Path,
+	})
+	return
 }
 
-func (te *Executor) NewChild() *Executor {
-	child := NewExecutor(te.template)
-	child.parent = te
+func (this *Executor) Template() *Template {
+	return this.template
+}
+
+func (this *Executor) Parent() *Executor {
+	return this.parent
+}
+
+func (this *Executor) GetFuncs() funcs.FuncValues {
+	return this.funcs
+}
+
+func (this *Executor) NewChild() *Executor {
+	child := NewExecutor(this.template)
+	child.parent = this
+	child.StateOptions = this.StateOptions
+	child.super = this.super
 	return child
 }
 
-func (te *Executor) WriteError() *Executor {
-	if te.writeError != 1 {
-		te = te.NewChild()
-		te.writeError = 1
+func (this *Executor) WriteError() *Executor {
+	if this.writeError != 1 {
+		this = this.NewChild()
+		this.writeError = 1
 	}
-	return te
+	return this
 }
 
-func (te *Executor) NotWriteError() *Executor {
-	if te.writeError != 2 {
-		te = te.NewChild()
-		te.writeError = 2
+func (this *Executor) NotWriteError() *Executor {
+	if this.writeError != 2 {
+		this = this.NewChild()
+		this.writeError = 2
 	}
-	return te
+	return this
 }
 
-func (te *Executor) IsWriteError() bool {
-	p := te
+func (this *Executor) IsWriteError() bool {
+	p := this
 	for p != nil {
 		if p.writeError == 1 {
 			return true
@@ -64,94 +111,85 @@ func (te *Executor) IsWriteError() bool {
 	return false
 }
 
-func (te *Executor) FilterFuncs(names ...string) *funcs.FuncValues {
+func (this *Executor) FilterFuncs(names ...string) (funcs.FuncValues, error) {
 	if len(names) == 0 {
-		var items []*funcs.FuncValues
-		e := te
+		var items []funcs.FuncValues
+		e := this
 		for e != nil {
 			items = append(items, e.funcs)
 			e = e.parent
 		}
-		return funcs.NewValues(items...)
+		return funcs.NewValues(items...), nil
 	}
 	fvalues := funcs.NewValues()
 	for _, name := range names {
-		f := te.FindFunc(name)
+		f := this.FindFunc(name)
 		if f == nil {
-			panic(fmt.Errorf("Function %q doesn't exists.", name))
+			return nil, fmt.Errorf("Function %q doesn't exists.", name)
 		}
 		fvalues.SetValue(name, f)
 	}
-	return fvalues
+	return fvalues, nil
 }
 
-func (te *Executor) AppendFuncs(funcMaps ...funcs.FuncMap) error {
-	return te.funcs.Append(funcMaps...)
+func (this *Executor) AppendFuncs(funcMaps ...funcs.FuncMap) error {
+	return this.funcs.Append(funcMaps...)
 }
 
-func (te *Executor) AppendFuncsValues(funcValues ...*funcs.FuncValues) *Executor {
-	te.funcs.AppendValues(funcValues...)
-	return te
+func (this *Executor) AppendFuncsValues(funcValues ...funcs.FuncValues) *Executor {
+	this.funcs.AppendValues(funcValues...)
+	return this
 }
 
-func (te *Executor) Funcs(funcMaps ...funcs.FuncMap) *Executor {
+func (this *Executor) Funcs(funcMaps ...funcs.FuncMap) *Executor {
 	if len(funcMaps) > 0 {
 		fv, err := funcs.CreateValuesFunc(funcMaps...)
 		if err != nil {
 			panic(err)
 		}
-		return te.NewChild().SetFuncs(fv)
+		return this.NewChild().SetFuncs(fv)
 	}
-	return te
+	return this
 }
 
-func (te *Executor) FuncsValues(funcValues ...*funcs.FuncValues) *Executor {
+func (this *Executor) FuncsValues(funcValues ...funcs.FuncValues) *Executor {
 	if len(funcValues) > 0 {
-		return te.NewChild().SetFuncs(funcs.NewValues(funcValues...))
+		return this.NewChild().SetFuncs(funcs.NewValues(funcValues...))
 	}
-	return te
+	return this
 }
 
-func (te *Executor) SetFuncs(values *funcs.FuncValues) *Executor {
-	te.funcs = values
-	return te
+func (this *Executor) SetFuncs(values funcs.FuncValues) *Executor {
+	this.funcs = values
+	return this
 }
 
-func (te *Executor) FindFunc(name string) *funcs.FuncValue {
-	if fn := te.funcs.Get(name); fn != nil {
+func (this *Executor) FindFunc(name string) *funcs.FuncValue {
+	if fn := this.funcs.Get(name); fn != nil {
 		return fn
 	}
-	if te.parent != nil {
-		return te.parent.FindFunc(name)
+	if this.parent != nil {
+		return this.parent.FindFunc(name)
 	}
 	return nil
 }
 
-type ErrorWithTrace struct {
-	Err        string
-	StackTrace []byte
-}
-
-func (et *ErrorWithTrace) Error() string {
-	return et.Err
-}
-
-func (et *ErrorWithTrace) Trace() []byte {
-	return et.StackTrace
-}
-
-func (e *Executor) execute(wr io.Writer, data interface{}) (err error) {
-	if !e.notCaptureError {
+func (this *Executor) execute(wr io.Writer, data interface{}) (err error) {
+	if !this.noCaptureError {
 		defer func() {
 			if r := recover(); r != nil {
-				if st, ok := r.(*ErrorWithTrace); ok {
+				if err2, ok := r.(error); ok && IsFatal(err2) {
+					panic(err2)
+				}
+				if st, ok := r.(tracederror.TracedError); ok {
 					err = st
 				} else {
-					name := e.template.name
-					if e.template.Path != "" {
-						name = e.template.Path + "[" + name + "]"
+					name := this.FullPath()
+					if ee, ok := r.(ExecError); ok {
+						err = tracederror.New(ee)
+					} else {
+						err = tracederror.New(fmt.Errorf("template %q: %v", name, r))
 					}
-					err = &ErrorWithTrace{fmt.Sprintf("Get error when render %v: %v", name, r), debug.Stack()}
 				}
 			}
 		}()
@@ -166,54 +204,76 @@ func (e *Executor) execute(wr io.Writer, data interface{}) (err error) {
 		}
 	}
 
-	t := e.template
+	t := this.template
 
-	state := &state{
-		e:            e,
+	state := &State{
+		e:            this,
 		tmpl:         t,
 		wr:           wr,
 		vars:         []variable{{"$", value}},
 		funcsValue:   make(map[string]*funcs.FuncValue),
-		contextValue: funcs.NewContextValue(e.funcs),
-		local:        e.Local,
+		contextValue: funcs.NewContextValue(this.funcs),
+		local:        this.Local,
+		context:      this.Context,
+	}
+
+	if this.StateOptions.OnNoField == nil {
+		this.StateOptions.OnNoField = func(recorde interface{}, fieldName string) (r interface{}, ok bool) {
+			return
+		}
 	}
 
 	if t.Tree == nil || t.Root == nil {
-		state.errorf("%q is an incomplete or empty template", t.Name())
+		state.errorf("'%s' is an incomplete or empty template", t.Name())
 	}
 
 	for fname, fun := range DefaultFuncMap {
 		state.funcsValue[fname] = funcs.NewFuncValue(fun, nil)
 	}
+
+	stateValue := reflect.ValueOf(state)
+	state.funcsValue["_tpl_state"] = funcs.NewFuncValue(func() reflect.Value {
+		return stateValue
+	}, nil)
 	state.funcsValue["_tpl_funcs"] = funcs.NewFuncValue(state.getFuncs, nil)
 	state.funcsValue["_tpl_data_funcs"] = funcs.NewFuncValue(state.dataFuncs, nil)
 	state.funcsValue["set"] = funcs.NewFuncValue(state.local.Set, nil)
 	state.funcsValue["get"] = funcs.NewFuncValue(state.local.Get, nil)
 	state.funcsValue["template_exec"] = funcs.NewFuncValue(state.templateExec, nil)
 	state.funcsValue["trim"] = funcs.NewFuncValue(state.trim, nil)
+	state.funcsValue["join"] = funcs.NewFuncValue(state.join, nil)
 	state.walk(value, t.Root)
 	return
 }
 
-func (e *Executor) Execute(wr io.Writer, data interface{}, funcs_ ...interface{}) (err error) {
-	ee := e
+func (this *Executor) Execute(wr io.Writer, data interface{}, funcs_ ...interface{}) (err error) {
+	ee := this
 
 	if len(funcs_) > 0 {
-		ee = e.NewChild()
+		ee = this.NewChild()
 		for i, fns := range funcs_ {
-			if funcMaps, ok := fns.(funcs.FuncMap); ok {
-				err = ee.AppendFuncs(funcMaps)
+			switch t := fns.(type) {
+			case map[string]interface{}:
+				err = ee.AppendFuncs(funcs.FuncMap(t))
 				if err != nil {
-					if e.IsWriteError() {
+					if this.IsWriteError() {
 						wr.Write([]byte(fmt.Sprint(err)))
 					}
 					return err
 				}
-			} else if funcValues, ok := fns.(*funcs.FuncValues); ok {
-				ee.AppendFuncsValues(funcValues)
-			} else {
+			case funcs.FuncMap:
+				err = ee.AppendFuncs(t)
+				if err != nil {
+					if this.IsWriteError() {
+						wr.Write([]byte(fmt.Sprint(err)))
+					}
+					return err
+				}
+			case funcs.FuncValues:
+				ee.AppendFuncsValues(t)
+			default:
 				err = fmt.Errorf("Invalid func #%v of %v type", i, reflect.TypeOf(fns).String())
-				if e.IsWriteError() {
+				if this.IsWriteError() {
 					wr.Write([]byte(fmt.Sprint(err)))
 				}
 				return err
@@ -226,16 +286,17 @@ func (e *Executor) Execute(wr io.Writer, data interface{}, funcs_ ...interface{}
 			return ee.FuncsValues(dataHaveFuncs.GetFuncValues()).execute(wr, dataHaveFuncs.Data())
 		} else if funcs, ok := data.(FuncMap); ok {
 			return ee.Funcs(funcs).execute(wr, nil)
-		} else if funcsValues, ok := data.(*FuncValues); ok {
+		} else if funcsValues, ok := data.(FuncValues); ok {
 			return ee.FuncsValues(funcsValues).execute(wr, nil)
 		}
 	}
-	return ee.execute(wr, data)
+	err = ee.execute(wr, data)
+	return
 }
 
-func (e *Executor) ExecuteString(data interface{}, funcs ...interface{}) (string, error) {
+func (this *Executor) ExecuteString(data interface{}, funcs ...interface{}) (string, error) {
 	var out bytes.Buffer
-	err := e.Execute(&out, data, funcs...)
+	err := this.Execute(&out, data, funcs...)
 	if err != nil {
 		return "", err
 	}
@@ -247,6 +308,11 @@ func NewExecutor(t *Template, funcMaps ...funcs.FuncMap) *Executor {
 	if err != nil {
 		panic(err)
 	}
-	data := make(LocalData)
-	return &Executor{nil, t, fv, 0, &data, false}
+	return &Executor{
+		template:   t,
+		funcs:      fv,
+		writeError: 0,
+		Local:      LocalData{},
+		Context:    context.Background(),
+	}
 }

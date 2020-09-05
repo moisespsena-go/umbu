@@ -69,6 +69,10 @@ const (
 	NodeTemplate                   // A template invocation action.
 	NodeVariable                   // A $ variable.
 	NodeWith                       // A with action.
+	NodeArg                        // A arg action.
+	NodeWrap
+	nodeBegin
+	nodeAfter
 )
 
 // Nodes.
@@ -324,10 +328,12 @@ type VariableNode struct {
 	Pos
 	tr    *Tree
 	Ident []string // Variable name and fields in lexical order.
+	Op    rune
+	Ptr   bool
 }
 
-func (t *Tree) newVariable(pos Pos, ident string) *VariableNode {
-	return &VariableNode{tr: t, NodeType: NodeVariable, Pos: pos, Ident: strings.Split(ident, ".")}
+func (t *Tree) newVariable(pos Pos, ident string, op rune) *VariableNode {
+	return &VariableNode{tr: t, NodeType: NodeVariable, Pos: pos, Ident: strings.Split(ident, "."), Op: op}
 }
 
 func (v *VariableNode) String() string {
@@ -725,7 +731,7 @@ func (e *elseNode) Copy() Node {
 	return e.tr.newElse(e.Pos, e.Line)
 }
 
-// BranchNode is the common representation of if, range, and with.
+// BranchNode is the common representation of if, range, with and arg.
 type BranchNode struct {
 	NodeType
 	Pos
@@ -734,6 +740,7 @@ type BranchNode struct {
 	Pipe     *PipeNode // The pipeline to be evaluated.
 	List     *ListNode // What to execute if the value is non-empty.
 	ElseList *ListNode // What to execute if the value is empty (nil if absent).
+	Piped    bool
 }
 
 func (b *BranchNode) String() string {
@@ -745,8 +752,25 @@ func (b *BranchNode) String() string {
 		name = "range"
 	case NodeWith:
 		name = "with"
+	case NodeArg:
+		name = "arg"
 	default:
 		panic("unknown branch type")
+	}
+	if b.Piped {
+		args, pipe := b.Pipe.Cmds[0:len(b.Pipe.Cmds)-1], b.Pipe.Cmds[len(b.Pipe.Cmds)-1]
+		s := name
+		if len(args) > 0 {
+			var s2 = []string{s}
+			for _, cmd := range args {
+				s2 = append(s2, fmt.Sprintf("%s", cmd))
+			}
+			s = strings.Join(s2, " ")
+		}
+		if b.ElseList != nil {
+			return fmt.Sprintf("{{%s | %s}}%s{{else}}%s{{end}}", s, pipe, b.List, b.ElseList)
+		}
+		return fmt.Sprintf("{{%s | %s}}%s{{end}}", s, pipe, b.List)
 	}
 	if b.ElseList != nil {
 		return fmt.Sprintf("{{%s %s}}%s{{else}}%s{{end}}", name, b.Pipe, b.List, b.ElseList)
@@ -769,6 +793,110 @@ func (b *BranchNode) Copy() Node {
 	default:
 		panic("unknown branch type")
 	}
+}
+
+// WrapNode is the common representation of wrap.
+type WrapNode struct {
+	NodeType
+	Pos
+	tr        *Tree
+	Line      int       // The line number in the input. Deprecated: Kept for compatibility.
+	Pipe      *PipeNode // The pipeline to be evaluated.
+	List      *ListNode // What to execute if the value is non-empty.
+	BeginList *ListNode // What to execute if the value is empty (nil if absent).
+	AfterList *ListNode
+	ElseList  *ListNode
+}
+
+func (b *WrapNode) String() (s string) {
+	name := ""
+	switch b.NodeType {
+	case NodeWrap:
+		name = "wrap"
+	default:
+		panic("unknown wrap type")
+	}
+	s = fmt.Sprintf("{{%s %s}}%s", name, b.Pipe, b.List)
+	if b.BeginList != nil {
+		s += fmt.Sprintf("{{begin}}%s", b.BeginList)
+	}
+	if b.AfterList != nil {
+		s += fmt.Sprintf("{{after}}%s", b.BeginList)
+	}
+	return s + "{{end}}"
+}
+
+func (b *WrapNode) tree() *Tree {
+	return b.tr
+}
+
+func (b *WrapNode) Copy() Node {
+	switch b.NodeType {
+	case NodeWrap:
+		return b.tr.newWrap(b.Pos, b.Line, b.Pipe, b.List, b.BeginList, b.AfterList, b.ElseList)
+	default:
+		panic("unknown branch type")
+	}
+}
+
+func (t *Tree) newWrap(pos Pos, line int, pipe *PipeNode, list, beginList, afterList, elseList *ListNode) *WrapNode {
+	return &WrapNode{tr: t, NodeType: NodeIf, Pos: pos, Line: line, Pipe: pipe, List: list, BeginList: beginList, AfterList: afterList, ElseList: elseList}
+}
+
+// beginNode represents an {{begin}} action. Does not appear in the final tree.
+type beginNode struct {
+	NodeType
+	Pos
+	tr   *Tree
+	Line int // The line number in the input. Deprecated: Kept for compatibility.
+}
+
+func (t *Tree) newBegin(pos Pos, line int) *beginNode {
+	return &beginNode{tr: t, NodeType: nodeBegin, Pos: pos, Line: line}
+}
+
+func (e *beginNode) Type() NodeType {
+	return nodeBegin
+}
+
+func (e *beginNode) String() string {
+	return "{{begin}}"
+}
+
+func (e *beginNode) tree() *Tree {
+	return e.tr
+}
+
+func (e *beginNode) Copy() Node {
+	return e.tr.newBegin(e.Pos, e.Line)
+}
+
+// beginNode represents an {{begin}} action. Does not appear in the final tree.
+type afterNode struct {
+	NodeType
+	Pos
+	tr   *Tree
+	Line int // The line number in the input. Deprecated: Kept for compatibility.
+}
+
+func (t *Tree) newAfter(pos Pos, line int) *afterNode {
+	return &afterNode{tr: t, NodeType: nodeAfter, Pos: pos, Line: line}
+}
+
+func (e *afterNode) Type() NodeType {
+	return nodeAfter
+}
+
+func (e *afterNode) String() string {
+	return "{{after}}"
+}
+
+func (e *afterNode) tree() *Tree {
+	return e.tr
+}
+
+func (e *afterNode) Copy() Node {
+	return e.tr.newAfter(e.Pos, e.Line)
 }
 
 // IfNode represents an {{if}} action and its commands.
@@ -808,6 +936,19 @@ func (t *Tree) newWith(pos Pos, line int, pipe *PipeNode, list, elseList *ListNo
 
 func (w *WithNode) Copy() Node {
 	return w.tr.newWith(w.Pos, w.Line, w.Pipe.CopyPipe(), w.List.CopyList(), w.ElseList.CopyList())
+}
+
+// WithNode represents a {{with}} action and its commands.
+type ArgNode struct {
+	BranchNode
+}
+
+func (t *Tree) newArg(pos Pos, line int, pipe *PipeNode, list *ListNode) *ArgNode {
+	return &ArgNode{BranchNode{tr: t, NodeType: NodeArg, Pos: pos, Line: line, Pipe: pipe, List: list, Piped: true}}
+}
+
+func (w *ArgNode) Copy() Node {
+	return w.tr.newArg(w.Pos, w.Line, w.Pipe.CopyPipe(), w.List.CopyList())
 }
 
 // TemplateNode represents a {{template}} action.
