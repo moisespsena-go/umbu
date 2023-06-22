@@ -21,6 +21,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/moisespsena-go/tracederror"
+
 	"github.com/moisespsena/template/funcs"
 	"github.com/moisespsena/template/text/template/parse"
 )
@@ -32,8 +33,10 @@ import (
 const maxExecDepth = 100000
 
 type StateOptions struct {
-	RequireFields bool
-	OnNoField     func(recorde interface{}, fieldName string) (r interface{}, ok bool)
+	RequireFields       bool
+	OnNoField           func(recorde interface{}, fieldName string) (r interface{}, ok bool)
+	Global              []variable
+	DotOverrideDisabled bool
 }
 
 // State represents the State of an execution. It's not part of the
@@ -45,17 +48,39 @@ type State struct {
 	wr           io.Writer
 	node         parse.Node // current node, for errors
 	vars         []variable // push-down stack of variable values.
-	depth        int        // the height of the stack of executing templates.
+	global       []variable
+	depth        int // the height of the stack of executing templates.
 	funcsValue   map[string]*funcs.FuncValue
 	contextValue reflect.Value
 	local        LocalData
 	context      context.Context
+	data         interface{}
+	dataValue    reflect.Value
 }
 
 // variable holds the dynamic value of a variable such as $, $x etc.
 type variable struct {
 	name  string
 	value reflect.Value
+}
+
+func (this *State) dotOverride(oldDot, newDot reflect.Value) reflect.Value {
+	if this.e.DotOverrideDisabled {
+		return oldDot
+	}
+	return newDot
+}
+
+func (this *State) withWriter(w io.Writer) func() {
+	oldWr := this.wr
+	this.wr = w
+	return func() {
+		this.wr = oldWr
+	}
+}
+
+func (this *State) Data() interface{} {
+	return this.data
 }
 
 // Executor returns the executor object.
@@ -123,7 +148,23 @@ func (this *State) getVar(n int) *variable {
 }
 
 // varValue returns the value of the named variable.
-func (this *State) changeVar(name string, value reflect.Value, op rune) {
+func (this *State) updateVar(name string, value reflect.Value) {
+	var v *variable
+	for i := this.mark() - 1; i >= 0; i-- {
+		if v2 := &this.vars[i]; v2.name == name {
+			v = &this.vars[i]
+			break
+		}
+	}
+	if v == nil {
+		this.errorf("undefined variable: %s", name)
+		return
+	}
+	v.value = value
+}
+
+// varValue returns the value of the named variable.
+func (this *State) changeVarExpr(name string, value reflect.Value, op rune) {
 	var v *variable
 	for i := this.mark() - 1; i >= 0; i-- {
 		if v2 := &this.vars[i]; v2.name == name {
@@ -154,9 +195,30 @@ func (this *State) varValue(name string) (value reflect.Value) {
 			return this.vars[i].value
 		}
 	}
-
+	l := len(this.global)
+	for i := l; i > 0; i-- {
+		if this.global[i-1].name == name {
+			return this.global[i-1].value
+		}
+	}
 	this.errorf("undefined variable: %s", name)
 	return zero
+}
+
+func (this *State) GetVar(name string) (value reflect.Value) {
+	l := len(this.vars)
+	for i := l; i > 0; i-- {
+		if this.vars[i-1].name == name {
+			return this.vars[i-1].value
+		}
+	}
+	l = len(this.global)
+	for i := l; i > 0; i-- {
+		if this.global[i-1].name == name {
+			return this.global[i-1].value
+		}
+	}
+	return
 }
 
 var zero reflect.Value
@@ -187,6 +249,9 @@ func (this *State) errorInfo() (info string) {
 }
 
 func (this *State) panic(err error) {
+	if err == errExit {
+		panic(err)
+	}
 	info := this.errorInfo()
 	var ewt tracederror.TracedError
 	switch t := err.(type) {
@@ -345,8 +410,10 @@ func (this *State) walk(dot reflect.Value, node parse.Node) {
 		this.walkIfOrWith(parse.NodeWith, dot, node.Pipe, node.List, node.ElseList)
 	case *parse.ArgNode:
 		this.walkArg(parse.NodeArg, dot, node.Pipe, node.List)
+	case *parse.CallbackNode:
+		this.walkCallback(parse.NodeCallback, dot, node.Pipe, node.List)
 	case *parse.WrapNode:
-		this.walkWrap(parse.NodeWrap, dot, node.Pipe, node.List, node.BeginList, node.AfterList, node.ElseList)
+		this.walkWrap(parse.NodeWrap, dot, node)
 	default:
 		this.errorf("unknown node: %s", node)
 	}
@@ -403,32 +470,103 @@ func (this *State) walkArg(typ parse.NodeType, dot reflect.Value, pipe *parse.Pi
 	}
 }
 
+// walkArg walks an 'arg' node.
+func (this *State) walkCallback(typ parse.NodeType, dot reflect.Value, pipe *parse.PipeNode, list *parse.ListNode) {
+	defer this.pop(this.mark())
+	args, pipec := pipe.Cmds[0:len(pipe.Cmds)-1], pipe.Cmds[len(pipe.Cmds)-1]
+	if len(args) > 0 {
+		dot = this.evalCommand(dot, args[0], dot) // previous value is this one's final arg.
+		// If the object has type interface{}, dig down one level to the thing inside.
+		if dot.Kind() == reflect.Interface && dot.Type().NumMethod() == 0 {
+			dot = reflect.ValueOf(dot.Interface()) // lovely!
+		}
+	}
+
+	var callCount int
+
+	this.push("$0", reflect.ValueOf(&callCount))
+	this.push("$@", reflect.Value{})
+	this.push("$!", reflect.Value{})
+
+	handler := WalkHandler(func(w io.Writer, dot interface{}, args ...interface{}) (err error) {
+		defer this.pop(this.mark())
+		this.setVar(2, reflect.ValueOf(args))
+		this.setVar(1, reflect.ValueOf(len(args)))
+		if w != nil {
+			defer this.withWriter(w)()
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				err = r.(error)
+			}
+		}()
+		this.walk(reflect.ValueOf(dot), list)
+		callCount++
+		return
+	})
+
+	pipec = pipec.Copy().(*parse.CommandNode)
+
+	newArgs := make([]parse.Node, len(pipec.Args)+2)
+	// function handler is first arg
+	newArgs[0] = pipec.Args[0]
+	newArgs[1] = &parse.ValNode{
+		NodeType: parse.NodeVal,
+		Pos:      pipe.Pos,
+		Value:    dot,
+	}
+	newArgs[2] = &parse.ValNode{
+		NodeType: parse.NodeVal,
+		Pos:      pipe.Pos,
+		Value:    reflect.ValueOf(handler),
+	}
+	// other args is after callback function
+	copy(newArgs[3:], pipec.Args[1:])
+	pipec.Args = newArgs
+
+	var value reflect.Value
+	value = this.evalCommand(dot, pipec, value)
+	switch value.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Interface:
+		if !value.IsNil() {
+			fmt.Fprint(this.wr, value)
+		}
+	default:
+		fmt.Fprint(this.wr, value)
+	}
+}
+
 // walkWrap walks an 'wrap' node.
-func (this *State) walkWrap(_ parse.NodeType, dot reflect.Value, pipe *parse.PipeNode, list, begin, after, elseList *parse.ListNode) {
+func (this *State) walkWrap(_ parse.NodeType, dot reflect.Value, node *parse.WrapNode) {
 	defer this.pop(this.mark())
 	oldWr := this.wr
-	var w = beginWriter{
-		begin: func() {
-			this.wr = oldWr
-			if begin != nil {
-				this.walk(dot, begin)
+	var w = wrapWriter{
+		begin: func(w io.Writer) {
+			oldW := this.wr
+			defer func() {
+				this.wr = oldW
+			}()
+			this.wr = w
+			if node.BeginList != nil {
+				this.walk(dot, node.BeginList)
 			}
 		},
-		w: this.wr,
+		w:     this.wr,
+		strip: node.Pipe.TrimRight,
 	}
-	if len(pipe.Cmds) == 1 && pipe.Cmds[0].String() == "strip" {
+	if len(node.Pipe.Cmds) == 1 && node.Pipe.Cmds[0].String() == "strip" {
 		w.strip = true
 	}
 	this.wr = &w
-	this.walk(dot, list)
+	this.walk(dot, node.List)
 	if w.noEmpty {
-		if after != nil {
-			this.walk(dot, after)
+		if node.AfterList != nil {
+			this.walk(dot, node.AfterList)
 		}
 	} else {
 		this.wr = oldWr
-		if elseList != nil {
-			this.walk(dot, elseList)
+		if node.ElseList != nil {
+			this.walk(dot, node.ElseList)
 		}
 	}
 }
@@ -488,13 +626,31 @@ func (this *State) walkTemplate(dot reflect.Value, t *parse.TemplateNode) {
 	if this.depth == maxExecDepth {
 		this.errorf("exceeded maximum template depth (%v)", maxExecDepth)
 	}
-	// Variables declared by the pipeline persist.
-	dot = this.evalPipeline(dot, t.Pipe)
+
+	var args []parse.Node
+	if t.Pipe != nil {
+		if len(t.Pipe.Cmds) == 1 {
+			oldArgs := t.Pipe.Cmds[0].Args
+			args = oldArgs[1:]
+			t.Pipe.Cmds[0].Args = oldArgs[0:1]
+			// Variables declared by the pipeline persist.
+			dot = this.evalPipeline(dot, t.Pipe)
+			t.Pipe.Cmds[0].Args = oldArgs
+		}
+	}
+	if len(args) < len(tmpl.args) {
+		this.errorf("bad template args %q. Want %d but got %d.", t.Name, len(tmpl.args), len(args))
+	}
 	newState := *this
 	newState.depth++
 	newState.tmpl = tmpl
 	// No dynamic scoping: template invocations inherit no variables.
-	newState.vars = []variable{{"$", dot}}
+	newState.vars = append(newState.vars[:tmpl.Tree.InheritedVarsLen], variable{"$", dot})
+	for i, arg := range args {
+		cmd := *t.Pipe.Cmds[0]
+		cmd.Args = []parse.Node{arg}
+		newState.vars = append(newState.vars, variable{tmpl.args[i], this.evalCommand(dot, &cmd, reflect.Value{})})
+	}
 	newState.walk(dot, tmpl.Root)
 }
 
@@ -520,9 +676,13 @@ func (this *State) evalPipeline(dot reflect.Value, pipe *parse.PipeNode) (value 
 	}
 	for _, variable := range pipe.Decl {
 		if variable.Op == '=' {
-			this.push(variable.Ident[0], value)
+			if variable.Update {
+				this.updateVar(variable.Ident[0], value)
+			} else {
+				this.push(variable.Ident[0], value)
+			}
 		} else {
-			this.changeVar(variable.Ident[0], value, variable.Op)
+			this.changeVarExpr(variable.Ident[0], value, variable.Op)
 		}
 	}
 	return value
@@ -542,6 +702,12 @@ func (this *State) evalCommand(dot reflect.Value, cmd *parse.CommandNode, final 
 	case *parse.ChainNode:
 		return this.evalChainNode(dot, n, cmd.Args, final)
 	case *parse.IdentifierNode:
+		if n.Ident == Globals {
+			return this.dataValue
+		}
+		if n.Ident == Self {
+			return this.vars[0].value
+		}
 		// Must be a function.
 		return this.evalFunction(dot, n, cmd, cmd.Args, final)
 	case *parse.PipeNode:
@@ -560,13 +726,17 @@ func (this *State) evalCommand(dot reflect.Value, cmd *parse.CommandNode, final 
 	case *parse.DotNode:
 		return dot
 	case *parse.NilNode:
-		this.errorf("nil is not a command")
+		return reflect.Value{}
 	case *parse.NumberNode:
 		return this.idealConstant(word)
 	case *parse.StringNode:
 		return reflect.ValueOf(word.Text)
 	case *parse.ExprNode:
 		return this.evalExprNode(dot, word, cmd.Args, final)
+	case *parse.ValNode:
+		return word.Value
+	case *parse.ValFactoryNode:
+		return word.New()
 	}
 	this.errorf("can't evaluate command %q", firstWord)
 	panic("not reached")
@@ -702,15 +872,120 @@ var (
 	blankValue = reflect.ValueOf("")
 )
 
-func (this *State) getFuncValue(name string) *funcs.FuncValue {
-	if v, ok := this.funcsValue[name]; ok {
-		return v
-	}
-	v := this.e.FindFunc(name)
-	if v == nil {
+func (this *State) getFuncValue(name string) (v *funcs.FuncValue) {
+	if v = this.GetFunc(name); v == nil {
 		this.errorf("%q is not a defined function", name)
 	}
 	return v
+}
+
+func (this *State) GetFunc(name string) (v *funcs.FuncValue) {
+	if v, ok := this.funcsValue[name]; ok {
+		return v
+	}
+	if v = this.e.FindFunc(name); v != nil {
+		return v
+	}
+
+	// try get func from global attr
+	receiver := reflect.ValueOf(this.data)
+
+	if !receiver.IsValid() {
+		return
+	}
+
+	typ := receiver.Type()
+
+	if i, ok := receiver.Interface().(AttrGetter); ok {
+		if val, ok := i.GetAttr(name); ok {
+			rv := reflect.ValueOf(val)
+			if rv.Kind() == reflect.Func {
+				return funcs.NewFuncValue(val, &rv)
+			}
+		}
+		return
+	}
+
+	receiver, isNil := indirect(receiver)
+	// Unless it's an interface, need to get to a value of type *T to guarantee
+	// we see all methods of T and *T.
+	ptr := receiver
+	if ptr.Kind() != reflect.Interface && ptr.Kind() != reflect.Ptr && ptr.CanAddr() {
+		ptr = ptr.Addr()
+	}
+	if method := ptr.MethodByName(name); method.IsValid() {
+		return funcs.NewFuncValue(nil, &method)
+	}
+
+	switch receiver.Kind() {
+	case reflect.Struct:
+		tField, ok := receiver.Type().FieldByName(name)
+		if ok {
+			if isNil {
+				return
+			}
+			field := receiver.FieldByIndex(tField.Index)
+			if tField.PkgPath != "" { // field is unexported
+				return
+			}
+			return funcs.NewFuncValue(nil, &field)
+		}
+	case reflect.Map:
+		if isNil {
+			this.errorf("nil pointer evaluating %s.%s", typ, name)
+		}
+		// If it's a map, attempt to use the field name as a key.
+		nameVal := reflect.ValueOf(name)
+		if nameVal.Type().AssignableTo(receiver.Type().Key()) {
+			result := receiver.MapIndex(nameVal)
+			if !result.IsValid() {
+				return
+			}
+			return funcs.NewFuncValue(nil, &result)
+		}
+	}
+	return
+}
+
+func (this *State) Call(name string, args, result []any) (ok bool) {
+	f := this.GetFunc(name)
+	if f == nil {
+		return
+	}
+	ok = true
+
+	var (
+		fun     = f.ContextualValue(this.contextValue)
+		typ     = fun.Type()
+		in, out []reflect.Value
+		i       int
+	)
+
+	if typ.NumIn() > 0 && typ.In(0) == stateType {
+		in = make([]reflect.Value, len(args)+1)
+		in[0] = reflect.ValueOf(this)
+		i++
+	} else {
+		in = make([]reflect.Value, len(args))
+	}
+
+	for _, v := range args {
+		in[i] = reflect.ValueOf(v)
+		i++
+	}
+
+	out = fun.Call(in)
+
+	for i := range result {
+		switch out[i].Kind() {
+		case reflect.Ptr:
+			reflect.ValueOf(result[i]).Set(out[i])
+		default:
+			reflect.ValueOf(result[i]).Elem().Set(out[i])
+		}
+	}
+
+	return
 }
 
 func (this *State) getFuncRvalue(name string) reflect.Value {
@@ -734,7 +1009,20 @@ func (this *State) evalField(dot reflect.Value, fieldName string, node parse.Nod
 		}
 		return zero
 	}
+
 	typ := receiver.Type()
+
+	if i, ok := receiver.Interface().(AttrGetter); ok {
+		if val, ok := i.GetAttr(fieldName); ok {
+			val := reflect.ValueOf(val)
+			if val.Kind() == reflect.Func {
+				return this.evalCall(dot, val, node, fieldName, args, final)
+			}
+			return val
+		}
+		return reflect.Value{}
+	}
+
 	receiver, isNil := indirect(receiver)
 	// Unless it's an interface, need to get to a value of type *T to guarantee
 	// we see all methods of T and *T.
@@ -777,9 +1065,6 @@ func (this *State) evalField(dot reflect.Value, fieldName string, node parse.Nod
 		// If it's a map, attempt to use the field name as a key.
 		nameVal := reflect.ValueOf(fieldName)
 		if nameVal.Type().AssignableTo(receiver.Type().Key()) {
-			if hasArgs {
-				this.errorf("%s is not a method but has arguments", fieldName)
-			}
 			result := receiver.MapIndex(nameVal)
 			if !result.IsValid() {
 				switch this.tmpl.option.missingKey {
@@ -801,7 +1086,16 @@ func (this *State) evalField(dot reflect.Value, fieldName string, node parse.Nod
 			return result
 		}
 	}
-	this.errorf("can't evaluate field %s in type %s", fieldName, typ)
+
+	if typ.Kind() == reflect.Interface && !isNil && ptr.IsValid() {
+		typ = ptr.Type()
+	}
+
+	var nils string
+	if isNil {
+		nils = "(nil)"
+	}
+	this.errorf("can't evaluate field %s in type %s%s", fieldName, typ, nils)
 	panic("not reached")
 }
 
@@ -825,7 +1119,7 @@ func (this *State) evalCall(dot, fun reflect.Value, node parse.Node, name string
 		numIn++
 	}
 	fNumIn := typ.NumIn()
-	stateArg := typ.NumIn() > 0 && typ.In(0) == stateType
+	stateArg := name == "call" || typ.NumIn() > 0 && typ.In(0) == stateType
 	if stateArg {
 		fNumIn--
 	}
@@ -849,9 +1143,11 @@ func (this *State) evalCall(dot, fun reflect.Value, node parse.Node, name string
 	if stateArg {
 		j++
 	}
+
 	for ; i < numFixed && i < len(args); i++ {
 		argv[i] = this.evalArg(dot, typ.In(i+j), args[i])
 	}
+
 	// Now the ... args.
 	if typ.IsVariadic() {
 		argType := typ.In(typ.NumIn() - 1).Elem() // Argument is a slice.
@@ -881,6 +1177,13 @@ func (this *State) evalCall(dot, fun reflect.Value, node parse.Node, name string
 	if stateArg {
 		argv = append([]reflect.Value{reflect.ValueOf(this)}, argv...)
 	}
+	return this.funCallResult(node, name, fun, argv)
+}
+
+func (this *State) funCallResult(node parse.Node, name string, fun reflect.Value, argv []reflect.Value) (v reflect.Value) {
+	if name == "" {
+		name = "≪anonymous≫"
+	}
 	result, err := this.funCall(fun, argv)
 	if err != nil {
 		if IsFatal(err) {
@@ -891,12 +1194,25 @@ func (this *State) evalCall(dot, fun reflect.Value, node parse.Node, name string
 	if len(result) == 0 {
 		return blankValue
 	}
-	// If we have an error that is not nil, stop execution and return that error to the caller.
-	if len(result) == 2 && !result[1].IsNil() {
-		this.at(node)
-		this.errorf("error calling %s: %s", name, result[1].Interface().(error))
+
+	switch len(result) {
+	case 1:
+		if valType := result[0].Type(); valType.Kind() == reflect.Interface && valType.Name() == "error" {
+			// If we have an error that is not nil, stop execution and return that error to the caller.
+			if !result[0].IsNil() {
+				this.at(node)
+				this.errorf("error calling %s: %s", name, result[0].Interface().(error))
+			}
+			return blankValue
+		}
+	case 2:
+		// If we have an error that is not nil, stop execution and return that error to the caller.
+		if !result[1].IsNil() {
+			this.at(node)
+			this.errorf("error calling %s: %s", name, result[1].Interface().(error))
+		}
 	}
-	v := result[0]
+	v = result[0]
 	if v.Type() == reflectValueType {
 		v = v.Interface().(reflect.Value)
 	}
@@ -906,11 +1222,24 @@ func (this *State) evalCall(dot, fun reflect.Value, node parse.Node, name string
 func (this *State) funCall(fun reflect.Value, argv []reflect.Value) (r []reflect.Value, err tracederror.TracedError) {
 	defer func() {
 		if r := recover(); r != nil {
+			if r == errExit {
+				panic(r)
+			}
 			switch t := r.(type) {
 			case tracederror.TracedError:
 				err = t
+			case error:
+				err = tracederror.New(ExecError{
+					Node: this.node,
+					Name: this.tmpl.Name(),
+					Err:  errors.Wrap(t, this.errorInfo()),
+				})
 			default:
-				err = tracederror.New(t)
+				err = tracederror.New(ExecError{
+					Node: this.node,
+					Name: this.tmpl.Name(),
+					Err:  errors.Wrap(fmt.Errorf("%#v", t), this.errorInfo()),
+				})
 			}
 		}
 	}()
@@ -958,6 +1287,8 @@ func (this *State) validateType(value reflect.Value, typ reflect.Type) reflect.V
 			if !value.IsValid() {
 				this.errorf("dereference of nil pointer of type %s", typ)
 			}
+		case value.Type().ConvertibleTo(typ):
+			value = value.Convert(typ)
 		case reflect.PtrTo(value.Type()).AssignableTo(typ) && value.CanAddr():
 			value = value.Addr()
 		default:
@@ -999,9 +1330,19 @@ func (this *State) evalArg(dot reflect.Value, typ reflect.Type, n parse.Node) re
 	case *parse.PipeNode:
 		return this.validateType(this.evalPipeline(dot, arg), typ)
 	case *parse.IdentifierNode:
+		if arg.Ident == Globals {
+			return this.dataValue
+		}
+		if arg.Ident == Self {
+			return this.vars[0].value
+		}
 		return this.validateType(this.evalFunction(dot, arg, arg, nil, zero), typ)
 	case *parse.ChainNode:
 		return this.validateType(this.evalChainNode(dot, arg, nil, zero), typ)
+	case *parse.ValNode:
+		return arg.Value
+	case *parse.ValFactoryNode:
+		return arg.New()
 	}
 	switch typ.Kind() {
 	case reflect.Bool:
@@ -1116,6 +1457,10 @@ func (this *State) evalEmptyInterface(dot reflect.Value, n parse.Node) reflect.V
 		return this.evalVariableNode(dot, n, nil, zero)
 	case *parse.PipeNode:
 		return this.evalPipeline(dot, n)
+	case *parse.ValNode:
+		return n.Value
+	case *parse.ValFactoryNode:
+		return n.New()
 	}
 	this.errorf("can't handle assignment of %s to empty interface argument", n)
 	panic("not reached")
@@ -1149,6 +1494,11 @@ func indirectInterface(v reflect.Value) reflect.Value {
 // the template.
 func (this *State) printValue(n parse.Node, v reflect.Value) {
 	this.at(n)
+	if v.IsValid() && v.Type().Kind() == reflect.Func {
+		if v = this.funCallResult(n, "", v, nil); v == blankValue {
+			return
+		}
+	}
 	iface, ok := printableValue(v)
 	if !ok {
 		this.errorf("can't print %s of type %s", n, v.Type())
@@ -1280,17 +1630,35 @@ func (this *State) exp(op rune, a, b reflect.Value) (value reflect.Value) {
 // templateExec executes the template and return the result value.
 func (this *State) templateExec(name reflect.Value, pipe ...reflect.Value) reflect.Value {
 	var (
-		names = name.String()
-		data  reflect.Value
+		result bytes.Buffer
+		oldW   = this.wr
 	)
+	this.wr = &result
+	defer func() {
+		this.wr = oldW
+	}()
+
+	this.templateYield(name, pipe...)
+
+	return reflect.ValueOf(result.String())
+}
+
+// templateYield executes the template and writes result into this writer
+func (this *State) templateYield(name reflect.Value, pipe ...reflect.Value) {
+	this.templateYieldName(name.String(), pipe...)
+}
+
+// templateYield executes the template and writes result into this writer
+func (this *State) templateYieldName(name string, pipe ...reflect.Value) {
+	var data reflect.Value
 
 	if len(pipe) == 1 {
 		data = pipe[0]
 	}
 
-	tmpl := this.tmpl.tmpl[names]
+	tmpl := this.tmpl.tmpl[name]
 	if tmpl == nil {
-		this.errorf("template %q not defined", names)
+		this.errorf("template %q not defined", name)
 	}
 	if this.depth == maxExecDepth {
 		this.errorf("exceeded maximum template depth (%v)", maxExecDepth)
@@ -1299,14 +1667,14 @@ func (this *State) templateExec(name reflect.Value, pipe ...reflect.Value) refle
 	executor := tmpl.CreateExecutor()
 	executor.noCaptureError = true
 	executor.parent = this.e
-	result, err := executor.ExecuteString(data)
+	executor.StateOptions.Global = append(this.global, this.vars...)
+	err := executor.Execute(this.wr, data)
 	if err != nil {
 		this.panic(ExecError{
-			Name: this.tmpl.name + "/" + names,
+			Name: this.tmpl.name + "/" + name,
 			Err:  err,
 		})
 	}
-	return reflect.ValueOf(result)
 }
 
 // Exec executes the template and return the result value.

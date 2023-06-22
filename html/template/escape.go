@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html"
 
-	"github.com/moisespsena/template/funcs"
 	"github.com/moisespsena/template/text/template"
 	"github.com/moisespsena/template/text/template/parse"
 )
@@ -42,51 +41,6 @@ func escapeTemplate(tmpl *Template, node parse.Node, name string) error {
 		t.Tree = t.text.Tree
 	}
 	return nil
-}
-
-// evalArgs formats the list of arguments into a string. It is equivalent to
-// fmt.Sprint(args...), except that it deferences all pointers.
-func evalArgs(args ...interface{}) string {
-	// Optimization for simple common case of a single string argument.
-	if len(args) == 1 {
-		if s, ok := args[0].(string); ok {
-			return s
-		}
-	}
-	for i, arg := range args {
-		args[i] = indirectToStringerOrError(arg)
-	}
-	return fmt.Sprint(args...)
-}
-
-// builtinsFuncMap maps command names to functions that render their inputs safe.
-var builtinsFuncMap = funcs.FuncMap{
-	"_html_template_attrescaper":     attrEscaper,
-	"_html_template_commentescaper":  commentEscaper,
-	"_html_template_cssescaper":      cssEscaper,
-	"_html_template_cssvaluefilter":  cssValueFilter,
-	"_html_template_htmlnamefilter":  htmlNameFilter,
-	"_html_template_htmlescaper":     htmlEscaper,
-	"_html_template_jsregexpescaper": jsRegexpEscaper,
-	"_html_template_jsstrescaper":    jsStrEscaper,
-	"_html_template_jsvalescaper":    jsValEscaper,
-	"_html_template_nospaceescaper":  htmlNospaceEscaper,
-	"_html_template_rcdataescaper":   rcdataEscaper,
-	"_html_template_urlescaper":      urlEscaper,
-	"_html_template_urlfilter":       urlFilter,
-	"_html_template_urlnormalizer":   urlNormalizer,
-	"_eval_args_":                    evalArgs,
-}
-
-var builtins funcs.FuncValues
-
-func init() {
-	fcs, err := funcs.CreateValuesFunc(builtinsFuncMap)
-	if err != nil {
-		panic(err)
-	}
-
-	builtins = fcs
 }
 
 // escaper collects type inferences about templates and changes needed to make
@@ -394,13 +348,19 @@ func newIdentCmd(identifier string, pos parse.Pos) *parse.CommandNode {
 // nudge returns the context that would result from following empty string
 // transitions from the input context.
 // For example, parsing:
-//     `<a href=`
+//
+//	`<a href=`
+//
 // will end in context{stateBeforeValue, attrURL}, but parsing one extra rune:
-//     `<a href=x`
+//
+//	`<a href=x`
+//
 // will end in context{stateURL, delimSpaceOrTagEnd, ...}.
 // There are two transitions that happen when the 'x' is seen:
 // (1) Transition from a before-value state to a start-of-value state without
-//     consuming any character.
+//
+//	consuming any character.
+//
 // (2) Consume 'x' and transition past the first value character.
 // In this case, nudging produces the context after (1) happens.
 func nudge(c context) context {

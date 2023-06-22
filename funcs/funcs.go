@@ -35,6 +35,10 @@ func NewFuncValue(f interface{}, v *reflect.Value) (fv *FuncValue) {
 		v = &vv
 	}
 
+	if (*v).Kind() == reflect.Interface {
+		*v = (*v).Elem()
+	}
+
 	fv = &FuncValue{f: f, v: *v}
 	typ := v.Type()
 

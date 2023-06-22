@@ -11,12 +11,13 @@ import (
 	"io/ioutil"
 	"sync"
 	"testing"
-	"text/template/parse"
+
+	"github.com/moisespsena/template/text/template/parse"
 )
 
 func TestAddParseTree(t *testing.T) {
 	root := Must(New("root").Parse(`{{define "a"}} {{.}} {{template "b"}} {{.}} "></a>{{end}}`))
-	tree, err := parse.Parse("t", `{{define "b"}}<a href="{{end}}`, "", "", nil, nil)
+	tree, err := parse.Parse("t", `{{define "b"}}<a href="{{end}}`, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,14 +184,14 @@ func TestFuncMapWorksAfterClone(t *testing.T) {
 	}}
 
 	// get the expected error output (no clone)
-	uncloned := Must(New("").Funcs(funcs).Parse("{{customFunc}}"))
+	uncloned := MustE(New("").Parse("{{customFunc}}")).Funcs(funcs)
 	wantErr := uncloned.Execute(ioutil.Discard, nil)
 
 	// toClone must be the same as uncloned. It has to be recreated from scratch,
 	// since cloning cannot occur after execution.
-	toClone := Must(New("").Funcs(funcs).Parse("{{customFunc}}"))
+	toClone := Must(New("").Parse("{{customFunc}}"))
 	cloned := Must(toClone.Clone())
-	gotErr := cloned.Execute(ioutil.Discard, nil)
+	gotErr := cloned.CreateExecutor().Execute(ioutil.Discard, nil)
 
 	if wantErr.Error() != gotErr.Error() {
 		t.Errorf("clone error message mismatch want %q got %q", wantErr, gotErr)

@@ -139,6 +139,8 @@ func (this *TemplateRender) RenderC(state *template.State, w io.Writer, ctx cont
 		} else if !usingDefaultLayout {
 			err = fmt.Errorf("Failed to render layout: '%v.tmpl', got error: %v", filepath.Join("layouts", this.template.Layout), err)
 			return
+		} else {
+			return
 		}
 	}
 

@@ -17,6 +17,7 @@ type item struct {
 	pos  Pos      // The starting position, in bytes, of this item in the input string.
 	val  string   // The value of this item.
 	line int      // The line number at the start of this item.
+	args []interface{}
 }
 
 func (i item) String() string {
@@ -46,6 +47,7 @@ const (
 	// variable and math operators
 	itemMathExpr            // mathematical expression
 	itemColonEquals         // colon-equals (':=') introducing a declaration
+	itemEquals              // colon-equals ('=') set value to field or variable
 	itemPlusEquals          // plus-equals ('+=') concat or sum previous declaration
 	itemSubEquals           // sub-equals ('-=') subtract previous declaration
 	itemPowEquals           // pow-equals ('^=') pow previous declaration
@@ -61,6 +63,7 @@ const (
 	itemLeftParen  // '(' inside action
 	itemNumber     // simple number, including imaginary
 	itemPipe       // pipe symbol
+	itemNodePipe   // double pipe symbol
 	itemRawString  // raw quoted string (includes quotes)
 	itemRightDelim // right action delimiter
 	itemRightParen // ')' inside action
@@ -81,9 +84,11 @@ const (
 	itemTemplate // template keyword
 	itemWith     // with keyword
 	itemArg      // arg keyword
+	itemCallback // callback keyword
 
 	itemWrap
 	itemBegin
+	itemEnter
 	itemAfter
 	itemPtr
 )
@@ -100,8 +105,10 @@ var key = map[string]itemType{
 	"template": itemTemplate,
 	"with":     itemWith,
 	"arg":      itemArg,
+	"callback": itemCallback,
 	"wrap":     itemWrap,
 	"begin":    itemBegin,
+	"enter":    itemEnter,
 	"after":    itemAfter,
 }
 
@@ -173,8 +180,8 @@ func (l *lexer) backup() {
 }
 
 // emit passes an item back to the client.
-func (l *lexer) emit(t itemType) {
-	l.items <- item{t, l.start, l.input[l.start:l.pos], l.line}
+func (l *lexer) emit(t itemType, args ...interface{}) {
+	l.items <- item{t, l.start, l.input[l.start:l.pos], l.line, args}
 	// Some items contain text internally. If so, count their newlines.
 	switch t {
 	case itemText, itemRawString, itemLeftDelim, itemRightDelim:
@@ -207,7 +214,7 @@ func (l *lexer) acceptRun(valid string) {
 // errorf returns an error token and terminates the scan by passing
 // back a nil pointer that will be the next state, terminating l.nextItem.
 func (l *lexer) errorf(format string, args ...interface{}) stateFn {
-	l.items <- item{itemError, l.start, fmt.Sprintf(format, args...), l.line}
+	l.items <- item{itemError, l.start, fmt.Sprintf(format, args...), l.line, nil}
 	return nil
 }
 
@@ -366,7 +373,7 @@ func lexRightDelim(l *lexer) stateFn {
 		l.ignore()
 	}
 	l.pos += Pos(len(l.rightDelim))
-	l.emit(itemRightDelim)
+	l.emit(itemRightDelim, trimSpace)
 	if trimSpace {
 		l.pos += leftTrimLength(l.input[l.pos:])
 		l.ignore()
@@ -396,6 +403,8 @@ func lexInsideAction(l *lexer) stateFn {
 			return l.errorf("expected :=")
 		}
 		l.emit(itemColonEquals)
+	case r == '=':
+		l.emit(itemEquals)
 	case r == '+':
 		switch l.next() {
 		case '=':
@@ -462,7 +471,11 @@ func lexInsideAction(l *lexer) stateFn {
 			return l.errorf("expected left space")
 		}
 	case r == '|':
-		l.emit(itemPipe)
+		if l.pos < Pos(len(l.input)) && l.input[l.pos] == '|' {
+			l.emit(itemNodePipe)
+		} else {
+			l.emit(itemPipe)
+		}
 	case r == '"':
 		return lexQuote
 	case r == '`':
@@ -536,6 +549,8 @@ Loop:
 				l.emit(itemField)
 			case word == "true", word == "false":
 				l.emit(itemBool)
+			case word == "nil":
+				l.emit(itemNil)
 			default:
 				l.emit(itemIdentifier)
 			}
@@ -573,9 +588,9 @@ func lexFieldOrVariable(l *lexer, typ itemType) stateFn {
 		return lexInsideAction
 	}
 	var r rune
-	for {
+	for i := 0; ; i++ {
 		r = l.next()
-		if !isAlphaNumeric(r) {
+		if !(i == 0 && (r == '@' || r == '!')) && !isAlphaNumeric(r) {
 			l.backup()
 			break
 		}

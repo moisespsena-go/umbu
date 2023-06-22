@@ -9,6 +9,7 @@ package parse
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -31,9 +32,6 @@ type Node interface {
 	tree() *Tree
 }
 
-// NodeType identifies the type of a parse tree node.
-type NodeType int
-
 // Pos represents a byte position in the original input text from which
 // this template was parsed.
 type Pos int
@@ -42,38 +40,91 @@ func (p Pos) Position() Pos {
 	return p
 }
 
+// NodeType identifies the type of a parse tree node.
+type NodeType int
+
+func (t NodeType) Is(o ...NodeType) NodeType {
+	for _, o := range o {
+		if o == t {
+			return t
+		}
+	}
+
+	return NodeNone
+}
+
 // Type returns itself and provides an easy default implementation
 // for embedding in a Node. Embedded in all non-trivial Nodes.
 func (t NodeType) Type() NodeType {
 	return t
 }
 
+func (t NodeType) String() string {
+	return nodeName[t]
+}
+
 const (
-	NodeText       NodeType = iota // Plain text.
-	NodeAction                     // A non-control action such as a field evaluation.
-	NodeBool                       // A boolean constant.
-	NodeChain                      // A sequence of field accesses.
-	NodeCommand                    // An element of a pipeline.
-	NodeDot                        // The cursor, dot.
-	nodeElse                       // An else action. Not added to tree.
-	nodeEnd                        // An end action. Not added to tree.
-	NodeField                      // A field or method name.
-	NodeIdentifier                 // An identifier; always a function name.
-	NodeIf                         // An if action.
-	NodeList                       // A list of Nodes.
-	NodeNil                        // An untyped nil constant.
-	NodeNumber                     // A numerical constant.
-	NodePipe                       // A pipeline of commands.
-	NodeRange                      // A range action.
-	NodeString                     // A string constant.
-	NodeTemplate                   // A template invocation action.
-	NodeVariable                   // A $ variable.
-	NodeWith                       // A with action.
-	NodeArg                        // A arg action.
+	NodeNone       NodeType = iota
+	NodeText                // Plain text.
+	NodeAction              // A non-control action such as a field evaluation.
+	NodeBool                // A boolean constant.
+	NodeChain               // A sequence of field accesses.
+	NodeCommand             // An element of a pipeline.
+	NodeDot                 // The cursor, dot.
+	nodeElse                // An else action. Not added to tree.
+	nodeEnd                 // An end action. Not added to tree.
+	NodeField               // A field or method name.
+	NodeIdentifier          // An identifier; always a function name.
+	NodeIf                  // An if action.
+	NodeList                // A list of Nodes.
+	NodeNil                 // An untyped nil constant.
+	NodeNumber              // A numerical constant.
+	NodePipe                // A pipeline of commands.
+	NodeRange               // A range action.
+	NodeString              // A string constant.
+	NodeTemplate            // A template invocation action.
+	NodeVariable            // A $ variable.
+	NodeWith                // A with action.
+	NodeArg                 // A arg action.
+	NodeCallback            // A callback action.
 	NodeWrap
 	nodeBegin
+	nodeEnter
 	nodeAfter
+	NodeVal
+	NodeValFactory
 )
+
+var nodeName = map[NodeType]string{
+	NodeText:       "text",
+	NodeAction:     "action",
+	NodeBool:       "bool",
+	NodeChain:      "chain",
+	NodeCommand:    "command",
+	NodeDot:        "dot",
+	nodeElse:       "else",
+	nodeEnd:        "end",
+	NodeField:      "field",
+	NodeIdentifier: "indentifier",
+	NodeIf:         "if",
+	NodeList:       "list",
+	NodeNil:        "nil",
+	NodeNumber:     "number",
+	NodePipe:       "pipe",
+	NodeRange:      "range",
+	NodeString:     "string",
+	NodeTemplate:   "template",
+	NodeVariable:   "var",
+	NodeWith:       "with",
+	NodeArg:        "arg",
+	NodeCallback:   "callback",
+	NodeWrap:       "wrap",
+	nodeBegin:      "begin",
+	nodeEnter:      "enter",
+	nodeAfter:      "after",
+	NodeVal:        "val",
+	NodeValFactory: "val_factory",
+}
 
 // Nodes.
 
@@ -148,10 +199,11 @@ func (t *TextNode) Copy() Node {
 type PipeNode struct {
 	NodeType
 	Pos
-	tr   *Tree
-	Line int             // The line number in the input. Deprecated: Kept for compatibility.
-	Decl []*VariableNode // Variable declarations in lexical order.
-	Cmds []*CommandNode  // The commands in lexical order.
+	tr        *Tree
+	Line      int             // The line number in the input. Deprecated: Kept for compatibility.
+	Decl      []*VariableNode // Variable declarations in lexical order.
+	Cmds      []*CommandNode  // The commands in lexical order.
+	TrimRight bool
 }
 
 func (t *Tree) newPipeline(pos Pos, line int, decl []*VariableNode) *PipeNode {
@@ -326,14 +378,18 @@ func (i *IdentifierNode) Copy() Node {
 type VariableNode struct {
 	NodeType
 	Pos
-	tr    *Tree
-	Ident []string // Variable name and fields in lexical order.
-	Op    rune
-	Ptr   bool
+	tr     *Tree
+	Ident  []string // Variable name and fields in lexical order.
+	Op     rune
+	Ptr    bool
+	Update bool
 }
 
-func (t *Tree) newVariable(pos Pos, ident string, op rune) *VariableNode {
-	return &VariableNode{tr: t, NodeType: NodeVariable, Pos: pos, Ident: strings.Split(ident, "."), Op: op}
+func (t *Tree) newVariable(pos Pos, ident string, op rune, update ...bool) *VariableNode {
+	v := &VariableNode{tr: t, NodeType: NodeVariable, Pos: pos, Ident: strings.Split(ident, "."), Op: op}
+	for _, v.Update = range update {
+	}
+	return v
 }
 
 func (v *VariableNode) String() string {
@@ -427,7 +483,8 @@ type FieldNode struct {
 }
 
 func (t *Tree) newField(pos Pos, ident string) *FieldNode {
-	return &FieldNode{tr: t, NodeType: NodeField, Pos: pos, Ident: strings.Split(ident[1:], ".")} // [1:] to drop leading period
+	f := &FieldNode{tr: t, NodeType: NodeField, Pos: pos, Ident: strings.Split(ident[1:], ".")} // [1:] to drop leading period
+	return f
 }
 
 func (f *FieldNode) String() string {
@@ -754,6 +811,8 @@ func (b *BranchNode) String() string {
 		name = "with"
 	case NodeArg:
 		name = "arg"
+	case NodeCallback:
+		name = "callback"
 	default:
 		panic("unknown branch type")
 	}
@@ -840,7 +899,7 @@ func (b *WrapNode) Copy() Node {
 }
 
 func (t *Tree) newWrap(pos Pos, line int, pipe *PipeNode, list, beginList, afterList, elseList *ListNode) *WrapNode {
-	return &WrapNode{tr: t, NodeType: NodeIf, Pos: pos, Line: line, Pipe: pipe, List: list, BeginList: beginList, AfterList: afterList, ElseList: elseList}
+	return &WrapNode{tr: t, NodeType: NodeWrap, Pos: pos, Line: line, Pipe: pipe, List: list, BeginList: beginList, AfterList: afterList, ElseList: elseList}
 }
 
 // beginNode represents an {{begin}} action. Does not appear in the final tree.
@@ -869,6 +928,35 @@ func (e *beginNode) tree() *Tree {
 
 func (e *beginNode) Copy() Node {
 	return e.tr.newBegin(e.Pos, e.Line)
+}
+
+// doNode represents an {{do}} action. Does not appear in the final tree.
+type enterNode struct {
+	NodeType
+	Pos
+	tr         *Tree
+	Line       int // The line number in the input. Deprecated: Kept for compatibility.
+	StripRigth bool
+}
+
+func (t *Tree) newEnter(pos Pos, line int, stripRigth bool) *enterNode {
+	return &enterNode{tr: t, NodeType: nodeEnter, Pos: pos, Line: line, StripRigth: stripRigth}
+}
+
+func (e *enterNode) Type() NodeType {
+	return nodeEnter
+}
+
+func (e *enterNode) String() string {
+	return "{{enter}}"
+}
+
+func (e *enterNode) tree() *Tree {
+	return e.tr
+}
+
+func (e *enterNode) Copy() Node {
+	return e.tr.newEnter(e.Pos, e.Line, e.StripRigth)
 }
 
 // beginNode represents an {{begin}} action. Does not appear in the final tree.
@@ -951,6 +1039,19 @@ func (w *ArgNode) Copy() Node {
 	return w.tr.newArg(w.Pos, w.Line, w.Pipe.CopyPipe(), w.List.CopyList())
 }
 
+// WithNode represents a {{with}} action and its commands.
+type CallbackNode struct {
+	BranchNode
+}
+
+func (t *Tree) newCallback(pos Pos, line int, pipe *PipeNode, list *ListNode) *CallbackNode {
+	return &CallbackNode{BranchNode{tr: t, NodeType: NodeCallback, Pos: pos, Line: line, Pipe: pipe, List: list, Piped: true}}
+}
+
+func (w *CallbackNode) Copy() Node {
+	return w.tr.newCallback(w.Pos, w.Line, w.Pipe.CopyPipe(), w.List.CopyList())
+}
+
 // TemplateNode represents a {{template}} action.
 type TemplateNode struct {
 	NodeType
@@ -978,4 +1079,51 @@ func (t *TemplateNode) tree() *Tree {
 
 func (t *TemplateNode) Copy() Node {
 	return t.tr.newTemplate(t.Pos, t.Line, t.Name, t.Pipe.CopyPipe())
+}
+
+// ValFactoryNode holds a value constant.
+type ValFactoryNode struct {
+	NodeType
+	Pos
+	tr  *Tree
+	Typ reflect.Type // The value
+}
+
+func (t *Tree) newValFactory(pos Pos, typ reflect.Type) *ValFactoryNode {
+	return &ValFactoryNode{tr: t, NodeType: NodeValFactory, Pos: pos, Typ: typ}
+}
+
+func (b *ValFactoryNode) String() string {
+	return b.Typ.String()
+}
+
+func (b *ValFactoryNode) tree() *Tree {
+	return b.tr
+}
+
+func (b *ValFactoryNode) Copy() Node {
+	return b.tr.newValFactory(b.Pos, b.Typ)
+}
+
+func (b *ValFactoryNode) New() reflect.Value {
+	return reflect.New(b.Typ)
+}
+
+// ValNode holds a value constant.
+type ValNode struct {
+	NodeType
+	Pos
+	Value reflect.Value // The value
+}
+
+func (b *ValNode) String() string {
+	return b.Value.String()
+}
+
+func (ValNode) tree() *Tree {
+	return nil
+}
+
+func (b ValNode) Copy() Node {
+	return &b
 }

@@ -8,32 +8,52 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/moisespsena/template/expr"
 	"github.com/vjeantet/jodaTime"
 
 	"github.com/moisespsena/template/funcs"
 )
 
 var builtins = funcs.FuncMap{
-	"and":      and,
-	"call":     call,
-	"html":     template.HTMLEscaper,
-	"index":    index,
-	"js":       template.JSEscaper,
-	"len":      length,
-	"not":      not,
-	"or":       or,
-	"print":    fmt.Sprint,
-	"printf":   fmt.Sprintf,
-	"println":  fmt.Sprintln,
-	"urlquery": template.URLQueryEscaper,
-	"contains": contains,
-	"to_time":  toTime,
-	"timef":    timeFormat,
-	"default":  defaultValue,
+	"and":            and,
+	"call":           call,
+	"html":           template.HTMLEscaper,
+	"index":          index,
+	"js":             template.JSEscaper,
+	"len":            length,
+	"slice":          slice,
+	"not":            not,
+	"or":             or,
+	"to_i":           toI,
+	"to_u":           toUi,
+	"to_b":           truth,
+	"to_s":           fmt.Sprint,
+	"print":          fmt.Sprint,
+	"printf":         fmt.Sprintf,
+	"println":        fmt.Sprintln,
+	"urlquery":       template.URLQueryEscaper,
+	"contains":       contains,
+	"to_time":        toTime,
+	"timef":          timeFormat,
+	"default":        defaultValue,
+	"is_null":        isNull,
+	"not_null":       isNotNull,
+	"make_slice":     makeSlice,
+	"append":         appendSlice,
+	"make_map":       makeMap,
+	"new_pair":       newPair,
+	"nil":            makeNil,
+	"null":           makeNil,
+	"exit":           makeExit,
+	"has_method":     hasMethod,
+	"first_valid":    firstValid,
+	"range_callback": RangeCallback,
+	"dict":           dict,
 
 	// Comparisons
 	"eq": eq, // ==
@@ -42,9 +62,20 @@ var builtins = funcs.FuncMap{
 	"le": le, // <=
 	"lt": lt, // <
 	"ne": ne, // !=
+
+	"pow":   pow,
+	"floor": floor,
 }
 
-var builtinFuncs funcs.FuncValues
+const (
+	Globals = "GLOBALS"
+	Self    = "SELF"
+)
+
+var (
+	builtinFuncs funcs.FuncValues
+	builtinNames = []string{Globals, Self}
+)
 
 func init() {
 	fcs, err := funcs.CreateValuesFunc(builtins)
@@ -53,6 +84,14 @@ func init() {
 	}
 
 	builtinFuncs = fcs
+
+	for name := range builtins {
+		builtinNames = append(builtinNames, name)
+	}
+}
+
+func BuiltinNames() []string {
+	return builtinNames
 }
 
 // prepareArg checks if value can be used as an argument of type argType, and
@@ -143,83 +182,147 @@ func contains(item reflect.Value, sub ...reflect.Value) (reflect.Value, error) {
 	return TRUE, nil
 }
 
+func intLike(typ reflect.Kind) bool {
+	switch typ {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	}
+	return false
+}
+
+// indexArg checks if a reflect.Value can be used as an index, and converts it to int if possible.
+func indexArg(index reflect.Value, cap int) (int, error) {
+	var x int64
+	switch index.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		x = index.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		x = int64(index.Uint())
+	case reflect.Invalid:
+		return 0, fmt.Errorf("cannot index slice/array with nil")
+	default:
+		return 0, fmt.Errorf("cannot index slice/array with type %s", index.Type())
+	}
+	if x < 0 || int(x) < 0 || int(x) > cap {
+		return 0, fmt.Errorf("index out of range: %d", x)
+	}
+	return int(x), nil
+}
+
 // Indexing.
 
 // index returns the result of indexing its first argument by the following
 // arguments. Thus "index x 1 2 3" is, in Go syntax, x[1][2][3]. Each
 // indexed item must be a map, slice, or array.
-func index(item reflect.Value, indices ...reflect.Value) (reflect.Value, error) {
-	v := indirectInterface(item)
-	if !v.IsValid() {
+func index(item reflect.Value, indexes ...reflect.Value) (reflect.Value, error) {
+	item = indirectInterface(item)
+	if !item.IsValid() {
 		return reflect.Value{}, fmt.Errorf("index of untyped nil")
 	}
-	for _, i := range indices {
-		index := indirectInterface(i)
+	for _, index := range indexes {
+		index = indirectInterface(index)
 		var isNil bool
-		if v, isNil = indirect(v); isNil {
+		if item, isNil = indirect(item); isNil {
 			return reflect.Value{}, fmt.Errorf("index of nil pointer")
 		}
-		switch v.Kind() {
+		switch item.Kind() {
 		case reflect.Array, reflect.Slice, reflect.String:
-			var x int64
-			switch index.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				x = index.Int()
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-				x = int64(index.Uint())
-			case reflect.Invalid:
-				return reflect.Value{}, fmt.Errorf("cannot index slice/array with nil")
-			default:
-				return reflect.Value{}, fmt.Errorf("cannot index slice/array with type %s", index.Type())
-			}
-			if x < 0 || x >= int64(v.Len()) {
-				return reflect.Value{}, fmt.Errorf("index out of range: %d", x)
-			}
-			v = v.Index(int(x))
-		case reflect.Map:
-			index, err := prepareArg(index, v.Type().Key())
+			x, err := indexArg(index, item.Len())
 			if err != nil {
 				return reflect.Value{}, err
 			}
-			if x := v.MapIndex(index); x.IsValid() {
-				v = x
+			item = item.Index(x)
+		case reflect.Map:
+			index, err := prepareArg(index, item.Type().Key())
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			if x := item.MapIndex(index); x.IsValid() {
+				item = x
 			} else {
-				v = reflect.Zero(v.Type().Elem())
+				item = reflect.Zero(item.Type().Elem())
 			}
 		case reflect.Invalid:
-			// the loop holds invariant: v.IsValid()
+			// the loop holds invariant: item.IsValid()
 			panic("unreachable")
 		default:
-			return reflect.Value{}, fmt.Errorf("can't index item of type %s", v.Type())
+			return reflect.Value{}, fmt.Errorf("can't index item of type %s", item.Type())
 		}
 	}
-	return v, nil
+	return item, nil
+}
+
+// Slicing.
+
+// slice returns the result of slicing its first argument by the remaining
+// arguments. Thus "slice x 1 2" is, in Go syntax, x[1:2], while "slice x"
+// is x[:], "slice x 1" is x[1:], and "slice x 1 2 3" is x[1:2:3]. The first
+// argument must be a string, slice, or array.
+func slice(item reflect.Value, indexes ...reflect.Value) (reflect.Value, error) {
+	item = indirectInterface(item)
+	if !item.IsValid() {
+		return reflect.Value{}, fmt.Errorf("slice of untyped nil")
+	}
+	if len(indexes) > 3 {
+		return reflect.Value{}, fmt.Errorf("too many slice indexes: %d", len(indexes))
+	}
+	var cap int
+	switch item.Kind() {
+	case reflect.String:
+		if len(indexes) == 3 {
+			return reflect.Value{}, fmt.Errorf("cannot 3-index slice a string")
+		}
+		cap = item.Len()
+	case reflect.Array, reflect.Slice:
+		cap = item.Cap()
+	default:
+		return reflect.Value{}, fmt.Errorf("can't slice item of type %s", item.Type())
+	}
+	// set default values for cases item[:], item[i:].
+	idx := [3]int{0, item.Len()}
+	for i, index := range indexes {
+		x, err := indexArg(index, cap)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		idx[i] = x
+	}
+	// given item[i:j], make sure i <= j.
+	if idx[0] > idx[1] {
+		return reflect.Value{}, fmt.Errorf("invalid slice index: %d > %d", idx[0], idx[1])
+	}
+	if len(indexes) < 3 {
+		return item.Slice(idx[0], idx[1]), nil
+	}
+	// given item[i:j:k], make sure i <= j <= k.
+	if idx[1] > idx[2] {
+		return reflect.Value{}, fmt.Errorf("invalid slice index: %d > %d", idx[1], idx[2])
+	}
+	return item.Slice3(idx[0], idx[1], idx[2]), nil
 }
 
 // Length
 
 // length returns the length of the item, with an error if it has no defined length.
-func length(item interface{}) (int, error) {
-	v := reflect.ValueOf(item)
-	if !v.IsValid() {
-		return 0, fmt.Errorf("len of untyped nil")
-	}
-	v, isNil := indirect(v)
+func length(item reflect.Value) (int, error) {
+	item, isNil := indirect(item)
 	if isNil {
 		return 0, fmt.Errorf("len of nil pointer")
 	}
-	switch v.Kind() {
+	switch item.Kind() {
 	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
-		return v.Len(), nil
+		return item.Len(), nil
 	}
-	return 0, fmt.Errorf("len of type %s", v.Type())
+	return 0, fmt.Errorf("len of type %s", item.Type())
 }
 
 // Function invocation
 
 // call returns the result of evaluating the first argument as a function.
 // The function must return 1 result, or 2 results, the second of which is an error.
-func call(fn reflect.Value, args ...reflect.Value) (reflect.Value, error) {
+func call(state *State, fn reflect.Value, args ...reflect.Value) (reflect.Value, error) {
 	v := indirectInterface(fn)
 	if !v.IsValid() {
 		return reflect.Value{}, fmt.Errorf("call of nil")
@@ -232,6 +335,13 @@ func call(fn reflect.Value, args ...reflect.Value) (reflect.Value, error) {
 		return reflect.Value{}, fmt.Errorf("function called with %d args; should be 1 or 2", typ.NumOut())
 	}
 	numIn := typ.NumIn()
+
+	var skip int
+
+	if typ.NumIn() > 0 && typ.In(0) == stateType {
+		skip++
+	}
+
 	var dddType reflect.Type
 	if typ.IsVariadic() {
 		if len(args) < numIn-1 {
@@ -243,8 +353,11 @@ func call(fn reflect.Value, args ...reflect.Value) (reflect.Value, error) {
 			return reflect.Value{}, fmt.Errorf("wrong number of args: got %d want %d", len(args), numIn)
 		}
 	}
-	argv := make([]reflect.Value, len(args))
-	for i, arg := range args {
+	argv := make([]reflect.Value, len(args)+skip)
+	if skip == 1 {
+		argv[0] = reflect.ValueOf(state)
+	}
+	for i, arg := range args[skip:] {
 		value := indirectInterface(arg)
 		// Compute the expected type. Clumsy because of variadics.
 		var argType reflect.Type
@@ -303,6 +416,54 @@ func or(arg0 reflect.Value, args ...reflect.Value) reflect.Value {
 	return arg0
 }
 
+// toI convert arg to int64
+func toI(arg reflect.Value) (v reflect.Value, err error) {
+	var i int64
+	switch arg.Kind() {
+	case reflect.String:
+		i, err = strconv.ParseInt(arg.String(), 10, 64)
+	case reflect.Bool:
+		if arg.Bool() {
+			i = 1
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i = v.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		i = int64(v.Uint())
+	default:
+		err = fmt.Errorf("can't convert %q to int64", arg.Type().String())
+	}
+	if err != nil {
+		return
+	}
+	v = reflect.ValueOf(i)
+	return
+}
+
+// toUi convert arg to i
+func toUi(arg reflect.Value) (v reflect.Value, err error) {
+	var i uint64
+	switch arg.Kind() {
+	case reflect.String:
+		i, err = strconv.ParseUint(arg.String(), 10, 64)
+	case reflect.Bool:
+		if arg.Bool() {
+			i = 1
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i = uint64(v.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		i = v.Uint()
+	default:
+		err = fmt.Errorf("can't convert %q to int64", arg.Type().String())
+	}
+	if err != nil {
+		return
+	}
+	v = reflect.ValueOf(i)
+	return
+}
+
 // not returns the Boolean negation of its argument.
 func not(arg reflect.Value) bool {
 	return !truth(arg)
@@ -345,6 +506,7 @@ func basicKind(v reflect.Value) (kind, error) {
 	case reflect.String:
 		return stringKind, nil
 	}
+
 	return invalidKind, errBadComparisonType
 }
 
@@ -526,4 +688,220 @@ func defaultValue(item ...interface{}) interface{} {
 		}
 	}
 	return nil
+}
+
+// isNull return if no has non nil values
+func isNull(item ...interface{}) bool {
+	for _, item := range item {
+		if item == nil {
+			continue
+		}
+		val := indirectInterface(reflect.ValueOf(item))
+		if val.IsValid() {
+			return false
+		}
+		switch val.Kind() {
+		case reflect.Array, reflect.Map, reflect.Slice, reflect.String, reflect.Chan, reflect.Func, reflect.Ptr,
+			reflect.Interface:
+			if !val.IsNil() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isNotNull return if has non nil values
+func isNotNull(item ...interface{}) bool {
+	for _, item := range item {
+		if item == nil {
+			continue
+		}
+		val := indirectInterface(reflect.ValueOf(item))
+		if val.IsValid() {
+			switch val.Kind() {
+			case reflect.Array, reflect.Map, reflect.Slice, reflect.String, reflect.Chan, reflect.Func, reflect.Ptr,
+				reflect.Interface:
+				if !val.IsNil() {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func makeSlice(s ...interface{}) []interface{} {
+	return s
+}
+
+func appendSlice(dest interface{}, value ...interface{}) interface{} {
+	destValue := reflect.ValueOf(dest)
+	for _, value := range value {
+		destValue = reflect.Append(destValue, reflect.ValueOf(value))
+	}
+	return destValue.Interface()
+}
+
+func makeMap(args ...interface{}) (m map[interface{}]interface{}) {
+	m = map[interface{}]interface{}{}
+	if len(args)%2 == 0 {
+		for i := 0; i < len(args); i += 2 {
+			m[args[i]] = args[i+1]
+		}
+	}
+	return m
+}
+
+func newPair(key, value interface{}) (s map[string]interface{}) {
+	return map[string]interface{}{
+		"K": key,
+		"V": value,
+	}
+}
+
+func makeNil() (s interface{}) {
+	return s
+}
+
+func makeExit() {
+	panic(errExit)
+}
+
+func hasMethod(obj reflect.Value, name reflect.Value) bool {
+	nameV := name.String()
+	obj = reflect.Indirect(obj)
+	if obj.MethodByName(nameV).IsValid() {
+		return true
+	}
+	if v := obj.FieldByName(nameV); v.IsValid() {
+		switch v.Kind() {
+		case reflect.Func:
+			return !v.IsNil()
+		case reflect.Interface:
+			if !v.IsNil() {
+				v := reflect.Indirect(v.Elem())
+				return v.IsValid() && v.Kind() == reflect.Func
+			}
+		}
+	}
+	return false
+}
+
+func firstValid(inputs ...reflect.Value) reflect.Value {
+	empty := reflect.ValueOf("")
+
+	for i, v := range inputs {
+		if v.Type().Kind() == reflect.Interface {
+			v = v.Elem()
+		}
+
+		switch v.Interface() {
+		case "", nil, 0:
+		default:
+			return inputs[i]
+		}
+	}
+
+	return empty
+}
+
+func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...interface{}) (err error) {
+	var (
+		state = &RangeElemState{Self: items}
+		val   = reflect.ValueOf(items)
+	)
+
+	oneIteration := func(elem reflect.Value) error {
+		state.Value = elem.Interface()
+		return cb(nil, state, args...)
+	}
+
+	switch val.Kind() {
+	case reflect.Array, reflect.Slice:
+		if val.Len() == 0 {
+			break
+		}
+
+		for i, l := 0, val.Len(); i < l; i++ {
+			state.IsLast = i == l-1
+			state.IsFirst = i == 0
+			state.Index = i
+			if err = oneIteration(val.Index(i)); err != nil {
+				return
+			}
+		}
+		return
+	case reflect.Map:
+		var (
+			i int
+			l = val.Len()
+		)
+		if l == 0 {
+			break
+		}
+		for _, key := range sortKeys(val.MapKeys()) {
+			state.IsLast = i == l-1
+			state.IsFirst = i == 0
+			state.Index = i
+			state.Key = key.Interface()
+			if err = oneIteration(val.MapIndex(key)); err != nil {
+				return
+			}
+			i++
+		}
+		return
+	case reflect.Chan:
+		if val.IsNil() {
+			break
+		}
+		i := 0
+		var next reflect.Value
+		elem, ok := val.Recv()
+		if !ok {
+			break
+		}
+
+		for ; ; i++ {
+			if next, ok = val.Recv(); ok {
+				state.IsLast = false
+				state.IsFirst = i == 0
+				state.Index = i
+				if err = oneIteration(elem); err != nil {
+					return
+				}
+				elem = next
+			} else {
+				break
+			}
+		}
+		state.IsLast = true
+		state.IsFirst = i == 0
+		state.Index = i
+		if err = oneIteration(elem); err != nil {
+			return
+		}
+		return
+	case reflect.Invalid:
+		break // An invalid value is likely a nil map, etc. and acts like an empty map.
+	default:
+		return fmt.Errorf("range can't iterate over %v", val)
+	}
+	return
+}
+
+func dict(args ...interface{}) map[interface{}]interface{} {
+	dict := make(map[interface{}]interface{})
+	for i := 0; i < len(args); i += 2 {
+		dict[args[i]] = args[i+1]
+	}
+	return dict
+}
+
+func pow(a, b reflect.Value) (reflect.Value, error) {
+	return expr.Expr(expr.OpPow, a, b)
+}
+
+func floor(a, b reflect.Value) (reflect.Value, error) {
+	return expr.Expr(expr.OpFloor, a, b)
 }

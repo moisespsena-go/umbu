@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"sync"
+
 	"github.com/moisespsena/template/text/template"
 	"github.com/moisespsena/template/text/template/parse"
 )
@@ -67,6 +68,7 @@ func (t *Template) Templates() []*Template {
 //
 // missingkey: Control the behavior during execution if a map is
 // indexed with a key that is not present in the map.
+//
 //	"missingkey=default" or "missingkey=invalid"
 //		The default behavior: Do nothing and continue execution.
 //		If printed, the result of the index operation is the string
@@ -75,7 +77,6 @@ func (t *Template) Templates() []*Template {
 //		The operation returns the zero value for the map type's element.
 //	"missingkey=error"
 //		Execution stops immediately with an error.
-//
 func (t *Template) Option(opt ...string) *Template {
 	t.text.Option(opt...)
 	return t
@@ -124,7 +125,7 @@ func (t *Template) CreateExecutor() *template.Executor {
 // the output writer.
 // A template may be executed safely in parallel, although if parallel
 // executions share a Writer the output may be interleaved.
-func (t *Template) Execute(wr io.Writer, data interface{}, funcs... interface{}) error {
+func (t *Template) Execute(wr io.Writer, data interface{}, funcs ...interface{}) error {
 	if err := t.escape(); err != nil {
 		return err
 	}
@@ -360,12 +361,25 @@ func (t *Template) Lookup(name string) *Template {
 // Must is a helper that wraps a call to a function returning (*Template, error)
 // and panics if the error is non-nil. It is intended for use in variable initializations
 // such as
+//
 //	var t = template.Must(template.New("name").Parse("html"))
 func Must(t *Template, err error) *Template {
 	if err != nil {
 		panic(err)
 	}
 	return t
+}
+
+// MustE is a helper that wraps a call to a function returning (*Template, error)
+// and panics if the error is non-nil. It is intended for use in variable initializations
+// such as
+//
+//	var t = template.Must(template.New("name").Parse("html"))
+func MustE(t *Template, err error) *Executor {
+	if err != nil {
+		panic(err)
+	}
+	return t.CreateExecutor()
 }
 
 // ParseFiles creates a new Template and parses the template definitions from

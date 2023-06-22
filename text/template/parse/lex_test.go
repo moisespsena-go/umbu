@@ -209,6 +209,8 @@ var lexTests = []lexTest{
 		mkItem(itemBegin, "begin"),
 		tSpace,
 		mkItem(itemAfter, "after"),
+		tSpace,
+		mkItem(itemDivEquals, "do"),
 		tRight,
 		tEOF,
 	}},

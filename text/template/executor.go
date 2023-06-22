@@ -9,8 +9,14 @@ import (
 	"strings"
 
 	"github.com/moisespsena-go/tracederror"
+	"github.com/pkg/errors"
+
 	"github.com/moisespsena/template/funcs"
 )
+
+type ExecutorOptions struct {
+	DotOverrideDisabled bool
+}
 
 type Executor struct {
 	StateOptions
@@ -22,6 +28,11 @@ type Executor struct {
 	noCaptureError bool
 	Context        context.Context
 	super          *State
+	rawData        func(dst io.Writer) error
+}
+
+func ExecutorOfRawData(rawData func(dst io.Writer) error) *Executor {
+	return &Executor{rawData: rawData}
 }
 
 func (this *Executor) NoCaptureError() {
@@ -175,9 +186,15 @@ func (this *Executor) FindFunc(name string) *funcs.FuncValue {
 }
 
 func (this *Executor) execute(wr io.Writer, data interface{}) (err error) {
+	if this.rawData != nil {
+		return this.rawData(wr)
+	}
 	if !this.noCaptureError {
 		defer func() {
 			if r := recover(); r != nil {
+				if r == errExit {
+					return
+				}
 				if err2, ok := r.(error); ok && IsFatal(err2) {
 					panic(err2)
 				}
@@ -185,9 +202,10 @@ func (this *Executor) execute(wr io.Writer, data interface{}) (err error) {
 					err = st
 				} else {
 					name := this.FullPath()
-					if ee, ok := r.(ExecError); ok {
-						err = tracederror.New(ee)
-					} else {
+					switch ee := r.(type) {
+					case error:
+						err = tracederror.New(errors.Wrapf(ee, "template %q", name))
+					default:
 						err = tracederror.New(fmt.Errorf("template %q: %v", name, r))
 					}
 				}
@@ -211,10 +229,13 @@ func (this *Executor) execute(wr io.Writer, data interface{}) (err error) {
 		tmpl:         t,
 		wr:           wr,
 		vars:         []variable{{"$", value}},
+		global:       this.StateOptions.Global,
 		funcsValue:   make(map[string]*funcs.FuncValue),
 		contextValue: funcs.NewContextValue(this.funcs),
 		local:        this.Local,
 		context:      this.Context,
+		data:         data,
+		dataValue:    value,
 	}
 
 	if this.StateOptions.OnNoField == nil {
@@ -240,6 +261,8 @@ func (this *Executor) execute(wr io.Writer, data interface{}) (err error) {
 	state.funcsValue["set"] = funcs.NewFuncValue(state.local.Set, nil)
 	state.funcsValue["get"] = funcs.NewFuncValue(state.local.Get, nil)
 	state.funcsValue["template_exec"] = funcs.NewFuncValue(state.templateExec, nil)
+	state.funcsValue["tpl_render"] = state.funcsValue["template_exec"]
+	state.funcsValue["tpl_yield"] = funcs.NewFuncValue(state.templateYield, nil)
 	state.funcsValue["trim"] = funcs.NewFuncValue(state.trim, nil)
 	state.funcsValue["join"] = funcs.NewFuncValue(state.join, nil)
 	state.walk(value, t.Root)
@@ -254,7 +277,7 @@ func (this *Executor) Execute(wr io.Writer, data interface{}, funcs_ ...interfac
 		for i, fns := range funcs_ {
 			switch t := fns.(type) {
 			case map[string]interface{}:
-				err = ee.AppendFuncs(funcs.FuncMap(t))
+				err = ee.AppendFuncs(t)
 				if err != nil {
 					if this.IsWriteError() {
 						wr.Write([]byte(fmt.Sprint(err)))

@@ -1,9 +1,14 @@
 package template
 
 import (
+	"errors"
+
 	"github.com/moisespsena-go/tracederror"
+
 	"github.com/moisespsena/template/text/template/parse"
 )
+
+var errExit = errors.New("exit")
 
 func Fatal(err interface{}) *fatal {
 	switch t := err.(type) {

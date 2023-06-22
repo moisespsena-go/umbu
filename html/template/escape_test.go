@@ -11,8 +11,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"text/template"
-	"text/template/parse"
+
+	"github.com/moisespsena/template/text/template"
+	"github.com/moisespsena/template/text/template/parse"
 )
 
 type badMarshaler struct{}
@@ -844,14 +845,14 @@ func TestEscapeSet(t *testing.T) {
 		for name, body := range test.inputs {
 			source += fmt.Sprintf("{{define %q}}%s{{end}} ", name, body)
 		}
-		tmpl, err := New("root").Funcs(fns).Parse(source)
+		tmpl, err := New("root").Parse(source)
 		if err != nil {
 			t.Errorf("error parsing %q: %v", source, err)
 			continue
 		}
 		var b bytes.Buffer
 
-		if err := tmpl.ExecuteTemplate(&b, "main", data); err != nil {
+		if err := tmpl.CreateExecutor().Funcs(fns).Execute(&b, "main", data); err != nil {
 			t.Errorf("%q executing %v", err.Error(), tmpl.Lookup("main"))
 			continue
 		}

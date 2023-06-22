@@ -135,6 +135,49 @@ data, defined in detail in the corresponding sections that follow.
 		is executed; otherwise, dot is set to the value of the pipeline
 		and T1 is executed.
 
+	{{callback | handler_func}}  {{end}}
+		Pass this block as function argument to handler_function.
+		When call callback tree, this receives three variables:
+			- `$0`: contains called count value.
+			- `$@`: contains a slice of passed args from handler.
+			- `$!`: contains length of `$@`.
+
+		Handler "repeat" function examples:
+
+		Template:
+		```
+		{{callback | repeat 5 -}}
+			{{$i := $0 -}}
+			[{{callback | repeat 3 -}}
+				{{- $i}}->{{$0}},
+			{{- end -}}]
+		{{end}}
+		```
+
+		The "repeat" handler function:
+		```
+		// with buffered result
+		func(callback func(w io.Writer, args ...interface{}) error, count int) (_ string, err error) {
+			var buf bytes.Buffer
+			for i:=0; i < count; i++ {
+				if err = callback(&w); err != nil {
+					return
+				}
+			}
+			return buf.String()
+		}
+
+		// or, unbuffered result
+		func(callback func(w io.Writer, args ...interface{}) error, count int) (err error) {
+			for i:=0; i < count; i++ {
+				if err = callback(nil); err != nil {
+					return
+				}
+			}
+			return
+		}
+		```
+
 Arguments
 
 An argument is a simple value, denoted by one of the following.
@@ -151,6 +194,8 @@ An argument is a simple value, denoted by one of the following.
 		$piOver2
 	  or
 		$
+      or system variables, not defined by user: `$!`, `$@`, `$0+`.
+
 	  The result is the value of the variable.
 	  Variables are described below.
 	- The name of a field of the data, which must be a struct, preceded

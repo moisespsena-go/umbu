@@ -20,6 +20,7 @@ type common struct {
 type Template struct {
 	Path string
 	name string
+	args []string
 	*parse.Tree
 	*common
 	leftDelim  string
@@ -27,9 +28,10 @@ type Template struct {
 }
 
 // New allocates a new, undefined template with the given name.
-func New(name string) *Template {
+func New(name string, args ...string) *Template {
 	t := &Template{
 		name: name,
+		args: args,
 	}
 	t.init()
 	return t
@@ -56,13 +58,14 @@ func (t *Template) SetPath(path string) *Template {
 // New allocates a new, undefined template associated with the given one and with the same
 // delimiters. The association, which is transitive, allows one template to
 // invoke another with a {{template}} action.
-func (t *Template) New(name string) *Template {
+func (t *Template) New(name string, args ...string) *Template {
 	t.init()
 	nt := &Template{
 		name:       name,
 		common:     t.common,
 		leftDelim:  t.leftDelim,
 		rightDelim: t.rightDelim,
+		args:       args,
 	}
 	return nt
 }
@@ -105,6 +108,7 @@ func (t *Template) copy(c *common) *Template {
 	nt := New(t.name)
 	nt.Tree = t.Tree
 	nt.common = c
+	nt.args = t.args
 	nt.leftDelim = t.leftDelim
 	nt.rightDelim = t.rightDelim
 	return nt
@@ -118,7 +122,7 @@ func (t *Template) AddParseTree(name string, tree *parse.Tree) (*Template, error
 	// If the name is the name of this template, overwrite this template.
 	nt := t
 	if name != t.name {
-		nt = t.New(name)
+		nt = t.New(name, tree.Args()...)
 	}
 	// Even if nt == t, we need to install it in the common.tmpl map.
 	if replace, err := t.associate(nt, tree); err != nil {
