@@ -16,14 +16,13 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/moisespsena/template/expr"
+	"github.com/moisespsena-go/umbu/expr"
 
 	"github.com/pkg/errors"
 
 	"github.com/moisespsena-go/tracederror"
-
-	"github.com/moisespsena/template/funcs"
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/funcs"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 // maxExecDepth specifies the maximum stack depth of templates within
@@ -1189,7 +1188,7 @@ func (this *State) funCallResult(node parse.Node, name string, fun reflect.Value
 		if IsFatal(err) {
 			panic(err)
 		}
-		this.panic(tracederror.Wrap(err, fmt.Sprintf("calling %q", name)))
+		this.panic(errors.Wrap(err, fmt.Sprintf("calling %q", name)))
 	}
 	if len(result) == 0 {
 		return blankValue

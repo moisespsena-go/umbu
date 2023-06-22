@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"unicode"
-
-	"github.com/moisespsena-go/maps"
 )
 
 // FuncMap is the type of the map defining the mapping from names to functions.
@@ -19,9 +17,9 @@ import (
 // apply to arguments of arbitrary type can use parameters of type interface{} or
 // of type reflect.Value. Similarly, functions meant to return a result of arbitrary
 // type can return interface{} or reflect.Value.
-type FuncMap = maps.MapSI
+type FuncMap map[string]interface{}
 
-type FuncMapSlice = maps.MapSiSlice
+type FuncMapSlice []FuncMap
 
 type FuncValue struct {
 	f   interface{}

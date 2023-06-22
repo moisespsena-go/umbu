@@ -4,12 +4,8 @@ import (
 	"context"
 	"io"
 
-	defaultlogger "github.com/moisespsena-go/default-logger"
-	path_helpers "github.com/moisespsena-go/path-helpers"
-	"github.com/moisespsena/template/html/template"
+	"github.com/moisespsena-go/umbu/html/template"
 )
-
-var log = defaultlogger.GetOrCreateLogger(path_helpers.GetCalledDir())
 
 // Template template struct
 type Template struct {

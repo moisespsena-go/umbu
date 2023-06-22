@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 func TestAddParseTree(t *testing.T) {

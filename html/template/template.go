@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/moisespsena/template/text/template"
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/text/template"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 // Template is a specialized Template from "text/template" that produces a safe

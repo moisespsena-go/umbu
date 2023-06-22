@@ -1,8 +1,8 @@
 package template
 
 import (
-	"github.com/moisespsena/template/funcs"
-	"github.com/moisespsena/template/text/template"
+	"github.com/moisespsena-go/umbu/funcs"
+	"github.com/moisespsena-go/umbu/text/template"
 )
 
 type (

@@ -4,8 +4,7 @@ import (
 	"errors"
 
 	"github.com/moisespsena-go/tracederror"
-
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 var errExit = errors.New("exit")

@@ -3,8 +3,8 @@ package template
 import (
 	"reflect"
 
-	"github.com/moisespsena/template"
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 func (this *State) walkRange(dot reflect.Value, r *parse.RangeNode) {
@@ -148,12 +148,12 @@ func (this *State) walkRangeWithArgElemAndIndex(dot reflect.Value, mark int, val
 			valPtr = val.Addr()
 		}
 
-		var it template.Iterator
+		var it umbu.Iterator
 
 		switch t := valPtr.Interface().(type) {
-		case template.Iterator:
+		case umbu.Iterator:
 			it = t
-		case template.IteratorGetter:
+		case umbu.IteratorGetter:
 			it = t.Iterator()
 		}
 

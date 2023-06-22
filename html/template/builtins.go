@@ -3,8 +3,8 @@ package template
 import (
 	"fmt"
 
-	"github.com/moisespsena/template/funcs"
-	"github.com/moisespsena/template/text/template"
+	"github.com/moisespsena-go/umbu/funcs"
+	"github.com/moisespsena-go/umbu/text/template"
 )
 
 // builtinsFuncMap maps command names to functions that render their inputs safe.

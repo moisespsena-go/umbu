@@ -1,6 +1,6 @@
 package template
 
-import "github.com/moisespsena/template/funcs"
+import "github.com/moisespsena-go/umbu/funcs"
 
 type (
 	FuncMap         = funcs.FuncMap

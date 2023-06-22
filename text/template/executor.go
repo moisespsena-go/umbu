@@ -9,9 +9,8 @@ import (
 	"strings"
 
 	"github.com/moisespsena-go/tracederror"
+	"github.com/moisespsena-go/umbu/funcs"
 	"github.com/pkg/errors"
-
-	"github.com/moisespsena/template/funcs"
 )
 
 type ExecutorOptions struct {

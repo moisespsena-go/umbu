@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"html"
 
-	"github.com/moisespsena/template/text/template"
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/text/template"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 // escapeTemplate rewrites the named template, which must be

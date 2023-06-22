@@ -1,6 +1,6 @@
 package main
 
-import "github.com/moisespsena/template/text/template"
+import "github.com/moisespsena-go/umbu/text/template"
 
 func main() {
 	t := template.New("teste")
@@ -8,7 +8,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	v, err := t.ExecuteString(map[string]string {"C": "Value"})
+	v, err := t.ExecuteString(map[string]string{"X": "Value"})
 	if err != nil {
 		println(err)
 	} else {

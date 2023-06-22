@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moisespsena/template/text/template"
-	"github.com/moisespsena/template/text/template/parse"
+	"github.com/moisespsena-go/umbu/text/template"
+	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
 type badMarshaler struct{}

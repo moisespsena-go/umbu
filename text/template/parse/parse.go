@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/moisespsena/template/expr"
+	"github.com/moisespsena-go/umbu/expr"
 )
 
 // Tree is the representation of a single parsed template.

@@ -13,10 +13,10 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/moisespsena/template/expr"
+	"github.com/moisespsena-go/umbu/expr"
 	"github.com/vjeantet/jodaTime"
 
-	"github.com/moisespsena/template/funcs"
+	"github.com/moisespsena-go/umbu/funcs"
 )
 
 var builtins = funcs.FuncMap{

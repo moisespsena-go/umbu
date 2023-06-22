@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/moisespsena/template/html/template"
+	"github.com/moisespsena-go/umbu/html/template"
 )
 
 type TemplateRender struct {
