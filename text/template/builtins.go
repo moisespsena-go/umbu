@@ -43,9 +43,9 @@ var builtins = funcs.FuncMap{
 	"default":        defaultValue,
 	"is_null":        isNull,
 	"not_null":       isNotNull,
-	"make_slice":     makeSlice,
+	"array":          makeSlice,
 	"append":         appendSlice,
-	"make_map":       makeMap,
+	"map":            makeMap,
 	"new_pair":       newPair,
 	"nil":            makeNil,
 	"null":           makeNil,
@@ -826,7 +826,8 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		for i, l := 0, val.Len(); i < l; i++ {
 			state.IsLast = i == l-1
 			state.IsFirst = i == 0
-			state.Index = i
+			state.Index = uint64(i)
+			state.Key = uint64(i)
 			if err = oneIteration(val.Index(i)); err != nil {
 				return
 			}
@@ -843,7 +844,7 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		for _, key := range sortKeys(val.MapKeys()) {
 			state.IsLast = i == l-1
 			state.IsFirst = i == 0
-			state.Index = i
+			state.Index = uint64(i)
 			state.Key = key.Interface()
 			if err = oneIteration(val.MapIndex(key)); err != nil {
 				return
@@ -866,7 +867,8 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 			if next, ok = val.Recv(); ok {
 				state.IsLast = false
 				state.IsFirst = i == 0
-				state.Index = i
+				state.Index = uint64(i)
+				state.Key = uint64(i)
 				if err = oneIteration(elem); err != nil {
 					return
 				}
@@ -877,7 +879,8 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		}
 		state.IsLast = true
 		state.IsFirst = i == 0
-		state.Index = i
+		state.Index = uint64(i)
+		state.Key = uint64(i)
 		if err = oneIteration(elem); err != nil {
 			return
 		}
