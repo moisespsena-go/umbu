@@ -331,7 +331,7 @@ func (t *Template) Executor(funcMaps ...funcs.FuncMap) *Executor {
 }
 
 func (t *Template) CreateExecutor(funcMaps ...funcs.FuncMap) *Executor {
-	return NewExecutor(t).SetFuncs(builtinFuncs).Funcs(funcMaps...)
+	return NewExecutor(t).SetFuncs(builtinFuncs).FuncsValues(t.funcs).Funcs(funcMaps...)
 }
 
 // Execute applies a parsed template to the specified data object,
@@ -643,6 +643,9 @@ func (this *State) walkTemplate(dot reflect.Value, t *parse.TemplateNode) {
 	newState := *this
 	newState.depth++
 	newState.tmpl = tmpl
+	if len(tmpl.funcs) > 0 {
+		defer this.e.funcs.With(tmpl.funcs)()
+	}
 	// No dynamic scoping: template invocations inherit no variables.
 	newState.vars = append(newState.vars[:tmpl.Tree.InheritedVarsLen], variable{"$", dot})
 	for i, arg := range args {
@@ -880,6 +883,9 @@ func (this *State) getFuncValue(name string) (v *funcs.FuncValue) {
 
 func (this *State) GetFunc(name string) (v *funcs.FuncValue) {
 	if v, ok := this.funcsValue[name]; ok {
+		return v
+	}
+	if v = this.tmpl.funcs.Get(name); v != nil {
 		return v
 	}
 	if v = this.e.FindFunc(name); v != nil {

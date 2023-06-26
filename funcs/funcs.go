@@ -86,7 +86,7 @@ func (this *FuncValuesSlice) AppendSlice(m ...[]map[string]*FuncValue) {
 }
 
 func (this *FuncValuesSlice) AppendMap(m ...map[string]*FuncValue) {
-	this.Append(FuncValues(m))
+	this.Append(m)
 }
 
 type FuncValues []map[string]*FuncValue
@@ -98,12 +98,20 @@ func (v FuncValues) Get(name string) *FuncValue {
 		return nil
 	}
 
-	for _, m := range v {
-		if f := m[name]; f != nil {
+	for i := len(v); i > 0; i-- {
+		if f := v[i-1][name]; f != nil {
 			return f
 		}
 	}
 	return nil
+}
+
+func (v *FuncValues) With(values ...FuncValues) (reset func()) {
+	at := len(*v)
+	v.AppendValues(values...)
+	return func() {
+		*v = (*v)[:at]
+	}
 }
 
 func (v *FuncValues) SetPair(name string, f interface{}, vf reflect.Value, check ...bool) (err error) {

@@ -5,6 +5,7 @@
 package template
 
 import (
+	"github.com/moisespsena-go/umbu/funcs"
 	"github.com/moisespsena-go/umbu/text/template/parse"
 )
 
@@ -25,6 +26,7 @@ type Template struct {
 	*common
 	leftDelim  string
 	rightDelim string
+	funcs      funcs.FuncValues
 }
 
 // New allocates a new, undefined template with the given name.
@@ -146,6 +148,14 @@ func (t *Template) Templates() []*Template {
 	return m
 }
 
+// GetTemplate returns  defined template by name
+func (t *Template) Template(name string) *Template {
+	if t.common == nil {
+		return nil
+	}
+	return t.tmpl[name]
+}
+
 // Delims sets the action delimiters to the specified strings, to be used in
 // subsequent calls to Parse, ParseFiles, or ParseGlob. Nested template
 // definitions will inherit the settings. An empty delimiter stands for the
@@ -206,4 +216,35 @@ func (t *Template) associate(new *Template, tree *parse.Tree) (bool, error) {
 	}
 	t.tmpl[new.name] = new
 	return true, nil
+}
+
+// Funcs add funcs to this Template
+func (t *Template) Funcs(funcMaps ...funcs.FuncMap) *Template {
+	if len(funcMaps) > 0 {
+		fv, err := funcs.CreateValuesFunc(funcMaps...)
+		if err != nil {
+			panic(err)
+		}
+		t.funcs.AppendValues(fv)
+	}
+	return t
+}
+
+// FuncsValues add funcs values to this Template
+func (t *Template) FuncsValues(funcValues ...funcs.FuncValues) *Template {
+	if len(funcValues) > 0 {
+		t.funcs.AppendValues(funcs.NewValues(funcValues...))
+	}
+	return t
+}
+
+// SetFuncs set funcs values to this template
+func (t *Template) SetFuncs(values funcs.FuncValues) *Template {
+	t.funcs = values
+	return t
+}
+
+// GetFuncs get all funcs values in this template
+func (t *Template) GetFuncs() funcs.FuncValues {
+	return t.funcs
 }

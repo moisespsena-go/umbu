@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/moisespsena-go/umbu/funcs"
 	"github.com/moisespsena-go/umbu/text/template"
 	"github.com/moisespsena-go/umbu/text/template/parse"
 )
@@ -27,6 +28,7 @@ type Template struct {
 	// The underlying template's parse tree, updated to be HTML-safe.
 	Tree       *parse.Tree
 	*nameSpace // common to all associated templates
+	funcs      funcs.FuncValues
 }
 
 // escapeOK is a sentinel value used to indicate valid escaping.
@@ -38,6 +40,37 @@ type nameSpace struct {
 	set     map[string]*Template
 	escaped bool
 	esc     escaper
+}
+
+// Funcs add funcs to this Template
+func (t *Template) Funcs(funcMaps ...funcs.FuncMap) *Template {
+	if len(funcMaps) > 0 {
+		fv, err := funcs.CreateValuesFunc(funcMaps...)
+		if err != nil {
+			panic(err)
+		}
+		t.funcs.AppendValues(fv)
+	}
+	return t
+}
+
+// FuncsValues add funcs values to this Template
+func (t *Template) FuncsValues(funcValues ...funcs.FuncValues) *Template {
+	if len(funcValues) > 0 {
+		t.funcs.AppendValues(funcs.NewValues(funcValues...))
+	}
+	return t
+}
+
+// SetFuncs set funcs values to this template
+func (t *Template) SetFuncs(values funcs.FuncValues) *Template {
+	t.funcs = values
+	return t
+}
+
+// GetFuncs get all funcs values in this template
+func (t *Template) GetFuncs() funcs.FuncValues {
+	return t.funcs
 }
 
 func (t *Template) SetPath(path string) *Template {
@@ -115,7 +148,7 @@ func (t *Template) escape() error {
 }
 
 func (t *Template) CreateExecutor() *template.Executor {
-	return t.text.CreateExecutor().FuncsValues(builtins)
+	return t.text.CreateExecutor().FuncsValues(builtins, t.funcs)
 }
 
 // Execute applies a parsed template to the specified data object,
@@ -250,6 +283,7 @@ func (t *Template) AddParseTree(name string, tree *parse.Tree) (*Template, error
 		text,
 		text.Tree,
 		t.nameSpace,
+		nil,
 	}
 	t.set[name] = ret
 	return ret, nil
@@ -280,6 +314,7 @@ func (t *Template) Clone() (*Template, error) {
 		textClone,
 		textClone.Tree,
 		ns,
+		nil,
 	}
 	ret.set[ret.Name()] = ret
 	for _, x := range textClone.Templates() {
@@ -294,6 +329,7 @@ func (t *Template) Clone() (*Template, error) {
 			x,
 			x.Tree,
 			ret.nameSpace,
+			nil,
 		}
 	}
 	// Return the template associated with the name of this template.
@@ -309,6 +345,7 @@ func New(name string) *Template {
 		template.New(name),
 		nil,
 		ns,
+		nil,
 	}
 	tmpl.set[name] = tmpl
 	return tmpl
@@ -330,6 +367,7 @@ func (t *Template) new(name string) *Template {
 		t.text.New(name),
 		nil,
 		t.nameSpace,
+		nil,
 	}
 	tmpl.set[name] = tmpl
 	return tmpl
