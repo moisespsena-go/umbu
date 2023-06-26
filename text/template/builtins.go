@@ -813,7 +813,7 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 	)
 
 	oneIteration := func(elem reflect.Value) error {
-		state.Value = elem.Interface()
+		state.Value = elem
 		return cb(nil, state, args...)
 	}
 
