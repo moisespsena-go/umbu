@@ -826,8 +826,8 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		for i, l := 0, val.Len(); i < l; i++ {
 			state.IsLast = i == l-1
 			state.IsFirst = i == 0
-			state.Index = uint64(i)
-			state.Key = uint64(i)
+			state.Index = i
+			state.Key = i
 			if err = oneIteration(val.Index(i)); err != nil {
 				return
 			}
@@ -844,7 +844,7 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		for _, key := range sortKeys(val.MapKeys()) {
 			state.IsLast = i == l-1
 			state.IsFirst = i == 0
-			state.Index = uint64(i)
+			state.Index = i
 			state.Key = key.Interface()
 			if err = oneIteration(val.MapIndex(key)); err != nil {
 				return
@@ -867,7 +867,7 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 			if next, ok = val.Recv(); ok {
 				state.IsLast = false
 				state.IsFirst = i == 0
-				state.Index = uint64(i)
+				state.Index = i
 				state.Key = uint64(i)
 				if err = oneIteration(elem); err != nil {
 					return
@@ -879,7 +879,7 @@ func RangeCallback(dot interface{}, cb WalkHandler, items interface{}, args ...i
 		}
 		state.IsLast = true
 		state.IsFirst = i == 0
-		state.Index = uint64(i)
+		state.Index = i
 		state.Key = uint64(i)
 		if err = oneIteration(elem); err != nil {
 			return

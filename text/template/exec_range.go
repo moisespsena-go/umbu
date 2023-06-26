@@ -264,21 +264,21 @@ func (this *State) walkRangeWithState(dot reflect.Value, mark int, val reflect.V
 		for i, l := 0, val.Len(); i < l; i++ {
 			state.IsLast = i == l-1
 			state.IsFirst = i == 0
-			state.Index = uint64(i)
+			state.Index = i
 			state.Key = uint64(i)
 			oneIteration(val.Index(i))
 		}
 		return
 	case reflect.Map:
 		var (
-			i uint64
+			i int
 			l = val.Len()
 		)
 		if l == 0 {
 			break
 		}
 		for _, key := range sortKeys(val.MapKeys()) {
-			state.IsLast = i == uint64(l-1)
+			state.IsLast = i == l-1
 			state.IsFirst = i == 0
 			state.Index = i
 			state.Key = key
@@ -301,7 +301,7 @@ func (this *State) walkRangeWithState(dot reflect.Value, mark int, val reflect.V
 			if next, ok = val.Recv(); ok {
 				state.IsLast = false
 				state.IsFirst = i == 0
-				state.Index = uint64(i)
+				state.Index = i
 				state.Key = uint64(i)
 				oneIteration(elem)
 				elem = next
@@ -311,7 +311,7 @@ func (this *State) walkRangeWithState(dot reflect.Value, mark int, val reflect.V
 		}
 		state.IsLast = true
 		state.IsFirst = i == 0
-		state.Index = uint64(i)
+		state.Index = i
 		state.Key = state.Index
 		oneIteration(elem)
 		return
@@ -325,7 +325,7 @@ func (this *State) walkRangeWithState(dot reflect.Value, mark int, val reflect.V
 
 type RangeElemState struct {
 	Value   interface{}
-	Index   uint64
+	Index   int
 	Key     interface{}
 	IsLast  bool
 	IsFirst bool
