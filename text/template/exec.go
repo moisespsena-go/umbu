@@ -647,7 +647,7 @@ func (this *State) walkTemplate(dot reflect.Value, t *parse.TemplateNode) {
 		defer this.e.funcs.With(tmpl.funcs)()
 	}
 	// No dynamic scoping: template invocations inherit no variables.
-	newState.vars = append(newState.vars[:tmpl.Tree.InheritedVarsLen], variable{"$", dot})
+	newState.vars = append(append([]variable{}, newState.vars[:tmpl.Tree.InheritedVarsLen]...), variable{"$", dot})
 	for i, arg := range args {
 		cmd := *t.Pipe.Cmds[0]
 		cmd.Args = []parse.Node{arg}
