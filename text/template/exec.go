@@ -1212,17 +1212,19 @@ func (this *State) funCallResult(node parse.Node, name string, fun reflect.Value
 			return blankValue
 		}
 	case 2:
-		switch t := result[1].Interface().(type) {
-		case bool:
+		switch result[1].Kind() {
+		case reflect.Bool:
 			result[0] = reflect.ValueOf(ResultOk{result[0].Interface(), result[1].Bool()})
-		case error:
-			// If we have an error that is not nil, stop execution and return that error to the caller.
-			if t != nil {
-				this.at(node)
-				this.errorf("error calling %s: %s", name, t)
-			}
 		default:
-			return reflect.ValueOf([]any{result[0].Interface(), t})
+			if valType := result[1].Type(); valType.Kind() == reflect.Interface && valType.Name() == "error" {
+				// If we have an error that is not nil, stop execution and return that error to the caller.
+				if !result[1].IsNil() {
+					this.at(node)
+					this.errorf("error calling %s: %s", name, result[1].Interface().(error))
+				}
+			} else {
+				return reflect.ValueOf([]any{result[0].Interface(), result[1].Interface()})
+			}
 		}
 	default:
 		var l = len(result)
