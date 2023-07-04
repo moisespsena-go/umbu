@@ -605,6 +605,8 @@ func isTrue(val reflect.Value) (truth, ok bool) {
 		}
 	case reflect.Struct:
 		switch vt := val.Interface().(type) {
+		case ResultOk:
+			truth = vt.Ok
 		case interface{ IsZero() bool }:
 			truth = !vt.IsZero()
 		default:
@@ -1196,11 +1198,10 @@ func (this *State) funCallResult(node parse.Node, name string, fun reflect.Value
 		}
 		this.panic(errors.Wrap(err, fmt.Sprintf("calling %q", name)))
 	}
-	if len(result) == 0 {
-		return blankValue
-	}
 
 	switch len(result) {
+	case 0:
+		return blankValue
 	case 1:
 		if valType := result[0].Type(); valType.Kind() == reflect.Interface && valType.Name() == "error" {
 			// If we have an error that is not nil, stop execution and return that error to the caller.
@@ -1211,11 +1212,26 @@ func (this *State) funCallResult(node parse.Node, name string, fun reflect.Value
 			return blankValue
 		}
 	case 2:
-		// If we have an error that is not nil, stop execution and return that error to the caller.
-		if !result[1].IsNil() {
-			this.at(node)
-			this.errorf("error calling %s: %s", name, result[1].Interface().(error))
+		switch t := result[1].Interface().(type) {
+		case bool:
+			result[0] = reflect.ValueOf(ResultOk{result[0].Interface(), result[1].Bool()})
+		case error:
+			// If we have an error that is not nil, stop execution and return that error to the caller.
+			if t != nil {
+				this.at(node)
+				this.errorf("error calling %s: %s", name, t)
+			}
+		default:
+			return reflect.ValueOf([]any{result[0].Interface(), t})
 		}
+	default:
+		var l = len(result)
+		v = reflect.ValueOf(make([]any, l))
+
+		for i := 0; i < l; i++ {
+			v.Index(i).Set(result[i])
+		}
+		return
 	}
 	v = result[0]
 	if v.Type() == reflectValueType {

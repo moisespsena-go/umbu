@@ -29,10 +29,10 @@ var builtins = funcs.FuncMap{
 	"slice":          slice,
 	"not":            not,
 	"or":             or,
-	"to_i":           toI,
-	"to_u":           toUi,
-	"to_b":           truth,
-	"to_s":           fmt.Sprint,
+	"int":            toI,
+	"uint":           toUi,
+	"bool":           truth,
+	"string":         fmt.Sprint,
 	"print":          fmt.Sprint,
 	"printf":         fmt.Sprintf,
 	"println":        fmt.Sprintln,
@@ -63,8 +63,10 @@ var builtins = funcs.FuncMap{
 	"lt": lt, // <
 	"ne": ne, // !=
 
-	"pow":   pow,
-	"floor": floor,
+	"pow":      pow,
+	"floor":    floor,
+	"typeof":   typeof,
+	"indirect": indirectInterface,
 }
 
 const (
@@ -907,4 +909,8 @@ func pow(a, b reflect.Value) (reflect.Value, error) {
 
 func floor(a, b reflect.Value) (reflect.Value, error) {
 	return expr.Expr(expr.OpFloor, a, b)
+}
+
+func typeof(a reflect.Value) reflect.Value {
+	return reflect.ValueOf(a.Type())
 }
