@@ -108,7 +108,7 @@ func (this *State) walkRangeWithArgElemAndIndex(dot reflect.Value, mark int, val
 		this.setVar(1, elem)
 		// Set next var (lexically the first if there are two) to the index.
 		this.setVar(2, index)
-		this.walk(this.dotOverride(dot, elem), r.List)
+		this.walk(dot, r.List)
 		this.pop(mark)
 	}
 	switch val.Kind() {
@@ -188,7 +188,7 @@ func (this *State) walkRangeWithArgElemAndIndexAndLast(dot reflect.Value, mark i
 		this.setVar(2, index)
 		// Set next var (lexically the two if there are three) to the is last.
 		this.setVar(3, isLast)
-		this.walk(this.dotOverride(dot, elem), r.List)
+		this.walk(dot, r.List)
 		this.pop(mark)
 	}
 	switch val.Kind() {
@@ -252,7 +252,7 @@ func (this *State) walkRangeWithState(dot reflect.Value, mark int, val reflect.V
 		state.Value = elem.Interface()
 		// Set top var (lexically the second if there are two) to the element.
 		this.setVar(1, stateValue)
-		this.walk(this.dotOverride(dot, elem), r.List)
+		this.walk(dot, r.List)
 		this.pop(mark)
 	}
 	switch val.Kind() {

@@ -32,10 +32,9 @@ import (
 const maxExecDepth = 100000
 
 type StateOptions struct {
-	RequireFields       bool
-	OnNoField           func(recorde interface{}, fieldName string) (r interface{}, ok bool)
-	Global              []variable
-	DotOverrideDisabled bool
+	RequireFields bool
+	OnNoField     func(recorde interface{}, fieldName string) (r interface{}, ok bool)
+	Global        []variable
 }
 
 // State represents the State of an execution. It's not part of the
@@ -61,13 +60,6 @@ type State struct {
 type variable struct {
 	name  string
 	value reflect.Value
-}
-
-func (this *State) dotOverride(oldDot, newDot reflect.Value) reflect.Value {
-	if this.e.DotOverrideDisabled {
-		return oldDot
-	}
-	return newDot
 }
 
 func (this *State) withWriter(w io.Writer) func() {
